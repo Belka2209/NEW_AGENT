@@ -12,6 +12,8 @@ KNOWN_TOOLS = {
     "run_command",
     "web_search",
     "current_datetime",
+    "get_weather",
+    "fetch_url",
 }
 
 

@@ -94,7 +94,7 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Поиск в интернете через DuckDuckGo. Ключ API не нужен.",
+            "description": "Поиск заголовков в интернете. Для погоды не использовать — есть get_weather.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -102,6 +102,34 @@ SCHEMAS: list[dict[str, Any]] = [
                     "max_results": {"type": "integer"},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Фактическая погода сейчас и на сегодня. Передай город, например «Санкт-Петербург».",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string"},
+                },
+                "required": ["city"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Скачать текст страницы по http/https ссылке.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                },
+                "required": ["url"],
             },
         },
     },
@@ -115,6 +143,8 @@ _HANDLERS: dict[str, ToolFn] = {
     "run_command": terminal.run_command,
     "web_search": web.web_search,
     "current_datetime": clock.current_datetime,
+    "get_weather": web.get_weather,
+    "fetch_url": web.fetch_url,
 }
 
 

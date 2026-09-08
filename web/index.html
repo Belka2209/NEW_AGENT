@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Agent</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">LA</div>
+      <div>
+        <strong>Local Agent</strong>
+        <div class="muted" id="model-label">модель не выбрана</div>
+      </div>
+    </div>
+    <button class="primary" id="new-chat" type="button">Новый чат</button>
+    <div class="session-list" id="sessions"></div>
+    <div class="status" id="status">Проверка Ollama…</div>
+  </aside>
+
+  <main class="main">
+    <div class="messages" id="messages"></div>
+    <form class="composer" id="form">
+      <textarea id="input" rows="2" placeholder="Сообщение агенту… Enter — отправить, Shift+Enter — новая строка"></textarea>
+      <button class="primary" id="send" type="submit">Отправить</button>
+    </form>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

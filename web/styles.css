@@ -167,6 +167,11 @@ body {
   border: 1px solid #243028;
 }
 
+.bubble.thinking {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .bubble.tool {
   align-self: flex-start;
   background: var(--tool);

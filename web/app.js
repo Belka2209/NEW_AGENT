@@ -21,9 +21,10 @@ function looksLikeToolJson(text) {
   return trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"');
 }
 
-function addBubble(role, text) {
+function addBubble(role, text, extraClass) {
   const node = document.createElement("div");
   node.className = `bubble ${role}`;
+  if (extraClass) node.classList.add(extraClass);
   node.textContent = text;
   messagesEl.appendChild(node);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -104,11 +105,6 @@ function displayMessage(msg) {
   }
   if (msg.role === "assistant" && msg.content && !looksLikeToolJson(msg.content)) {
     addBubble("assistant", msg.content);
-    return;
-  }
-  if (msg.role === "tool") {
-    const name = msg.raw?.name || "tool";
-    addBubble("tool", `${name}\n${msg.content}`);
   }
 }
 
@@ -146,7 +142,8 @@ async function sendMessage(text) {
   const empty = messagesEl.querySelector(".empty");
   if (empty) empty.remove();
   addBubble("user", text);
-  const assistant = addBubble("assistant", "");
+  const assistant = addBubble("assistant", "Секунду, я думаю…", "thinking");
+  let gotText = false;
 
   try {
     const response = await fetch(`/api/sessions/${currentId}/messages`, {
@@ -173,12 +170,18 @@ async function sendMessage(text) {
         if (!line) continue;
         const event = JSON.parse(line.slice(5).trim());
         if (event.type === "token") {
+          if (!gotText) {
+            assistant.textContent = "";
+            assistant.classList.remove("thinking");
+            gotText = true;
+          }
           assistant.textContent += event.text;
           messagesEl.scrollTop = messagesEl.scrollHeight;
-        } else if (event.type === "tool_start") {
-          addBubble("tool", `${event.name}\n${JSON.stringify(event.args, null, 2)}`);
-        } else if (event.type === "tool_result") {
-          addBubble("tool", `${event.name}\n${event.result}`);
+        } else if (event.type === "tool_start" || event.type === "tool_result") {
+          if (!gotText) {
+            assistant.textContent = "Секунду, я думаю…";
+            assistant.classList.add("thinking");
+          }
         } else if (event.type === "title") {
           renderSessions(await api("/api/sessions"));
         } else if (event.type === "error") {
@@ -186,7 +189,7 @@ async function sendMessage(text) {
         }
       }
     }
-    if (!assistant.textContent.trim()) assistant.remove();
+    if (!gotText) assistant.remove();
   } catch (err) {
     addBubble("error", err.message);
   } finally {

@@ -16,6 +16,11 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;");
 }
 
+function looksLikeToolJson(text) {
+  const trimmed = String(text).trim();
+  return trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"');
+}
+
 function addBubble(role, text) {
   const node = document.createElement("div");
   node.className = `bubble ${role}`;
@@ -97,7 +102,7 @@ function displayMessage(msg) {
     addBubble("user", msg.content);
     return;
   }
-  if (msg.role === "assistant" && msg.content) {
+  if (msg.role === "assistant" && msg.content && !looksLikeToolJson(msg.content)) {
     addBubble("assistant", msg.content);
     return;
   }

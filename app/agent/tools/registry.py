@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any, Callable
 
-from app.agent.tools import files, terminal, web
+from app.agent.tools import clock, files, terminal, web
 
 ToolFn = Callable[..., str]
 
@@ -71,6 +71,14 @@ SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "current_datetime",
+            "description": "Текущие дата и время на этой машине. Для вопросов «какое сегодня число».",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": "Выполнить команду в workspace/ (PowerShell на Windows). Без интерактива.",
             "parameters": {
@@ -106,6 +114,7 @@ _HANDLERS: dict[str, ToolFn] = {
     "search_files": files.search_files,
     "run_command": terminal.run_command,
     "web_search": web.web_search,
+    "current_datetime": clock.current_datetime,
 }
 
 

@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.tool_parse import parse_text_tool_calls
 from app.agent.tools.registry import SCHEMAS, execute_tool
 from app.config import settings
 from app.db import store
@@ -44,16 +45,26 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             async for event in stream_chat(messages, SCHEMAS):
                 if event["type"] == "token":
                     content += event["text"]
-                    yield event
                 elif event["type"] == "complete":
                     content = event["content"]
                     tool_calls = event["tool_calls"]
+
+            if not tool_calls:
+                parsed, leftover = parse_text_tool_calls(content)
+                tool_calls = parsed
+                content = leftover
+            elif parse_text_tool_calls(content)[0]:
+                _, leftover = parse_text_tool_calls(content)
+                content = leftover
 
             assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
             if tool_calls:
                 assistant["tool_calls"] = tool_calls
             store.add_message(session_id, assistant)
             messages.append(assistant)
+
+            if content and not tool_calls:
+                yield {"type": "token", "text": content}
 
             if not tool_calls:
                 yield {"type": "done"}
@@ -63,7 +74,7 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 name = call.get("function", {}).get("name") or "unknown"
                 raw_args = call.get("function", {}).get("arguments") or "{}"
                 try:
-                    parsed_args = json.loads(raw_args) if raw_args.strip() else {}
+                    parsed_args = json.loads(raw_args) if str(raw_args).strip() else {}
                 except json.JSONDecodeError:
                     parsed_args = {"_raw": raw_args}
 

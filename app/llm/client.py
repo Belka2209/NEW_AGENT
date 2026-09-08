@@ -68,6 +68,7 @@ async def stream_chat(
         "messages": messages,
         "stream": True,
         "tools": tools,
+        "tool_choice": "auto",
         "temperature": 0.3,
     }
 

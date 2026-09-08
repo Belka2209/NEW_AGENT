@@ -77,4 +77,18 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen2.5-coder:14b
 MAX_AGENT_STEPS=12
 TERMINAL_TIMEOUT=45
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHATS=работа=-100123456789,личный=123456789
 ```
+
+## Telegram-бот
+
+Chrome не нужен. Агент пишет через Bot API.
+
+1. В Telegram откройте `@BotFather` → `/newbot` → скопируйте токен.
+2. В `.env` на RDP: `TELEGRAM_BOT_TOKEN=...`
+3. Напишите боту `/start` в личке. Для группы: добавьте бота и отправьте в чат любое сообщение.
+4. Перезапустите uvicorn, в агенте скажите: «покажи чаты телеграм».
+5. Пропишите удобные имена в `TELEGRAM_CHATS=работа=-100...,личный=123...`
+
+Дальше: «напиши в работу: сервер поднят».

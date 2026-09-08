@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any, Callable
 
-from app.agent.tools import clock, files, terminal, web
+from app.agent.tools import clock, files, telegram, terminal, web
 
 ToolFn = Callable[..., str]
 
@@ -122,6 +122,37 @@ SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "telegram_status",
+            "description": "Проверить, подключён ли Telegram-бот.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_chats",
+            "description": "Список алиасов и недавних чатов бота (id, название).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "telegram_send",
+            "description": "Отправить сообщение в Telegram. chat — алиас из .env, @username или числовой id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chat": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["chat", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fetch_url",
             "description": "Скачать текст страницы по http/https ссылке.",
             "parameters": {
@@ -145,6 +176,9 @@ _HANDLERS: dict[str, ToolFn] = {
     "current_datetime": clock.current_datetime,
     "get_weather": web.get_weather,
     "fetch_url": web.fetch_url,
+    "telegram_status": telegram.telegram_status,
+    "telegram_chats": telegram.telegram_chats,
+    "telegram_send": telegram.telegram_send,
 }
 
 

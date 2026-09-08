@@ -14,6 +14,9 @@ KNOWN_TOOLS = {
     "current_datetime",
     "get_weather",
     "fetch_url",
+    "telegram_status",
+    "telegram_chats",
+    "telegram_send",
 }
 
 

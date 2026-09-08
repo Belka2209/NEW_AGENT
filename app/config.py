@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5-coder:14b"
     max_agent_steps: int = 12
     terminal_timeout: int = 45
+    telegram_bot_token: str = ""
+    telegram_chats: str = ""
 
     model_config = SettingsConfigDict(
         env_file=ROOT / ".env",

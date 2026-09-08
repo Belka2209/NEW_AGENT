@@ -17,8 +17,17 @@ def _token() -> str:
 
 def _api(method: str, payload: dict | None = None) -> dict:
     url = f"https://api.telegram.org/bot{_token()}/{method}"
-    response = httpx.post(url, json=payload or {}, timeout=20.0)
-    data = response.json()
+    try:
+        response = httpx.post(url, json=payload or {}, timeout=40.0)
+        response.raise_for_status()
+        data = response.json()
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(
+            "Telegram не ответил за 40 секунд. Проверьте интернет на RDP "
+            "и что api.telegram.org не заблокирован."
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Сеть Telegram: {exc}") from exc
     if not data.get("ok"):
         raise RuntimeError(data.get("description") or str(data))
     return data["result"]

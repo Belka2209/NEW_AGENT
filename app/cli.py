@@ -22,7 +22,7 @@ async def _one_turn(session_id: str, text: str) -> None:
         kind = event.get("type")
         if kind == "token":
             if thinking:
-                _print("\rАгент: " + " " * 24 + "\rАгент: ")
+                _print("\nАгент: ")
                 thinking = False
             _print(event.get("text") or "")
             answered = True
@@ -32,8 +32,9 @@ async def _one_turn(session_id: str, text: str) -> None:
                 thinking = True
         elif kind == "error":
             _print(f"\nОшибка: {event.get('message')}")
-    if thinking and not answered:
-        _print("\rАгент: готово, но текста нет. Спросите ещё раз.")
+            answered = True
+    if not answered:
+        _print("пустой ответ. Напишите /new и повторите вопрос.")
     _print("\n")
 
 

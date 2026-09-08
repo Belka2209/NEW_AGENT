@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agent.prompts import SYSTEM_PROMPT
-from app.agent.tool_parse import parse_text_tool_calls
+from app.agent.tool_parse import parse_text_tool_calls, strip_thinking
 from app.agent.tools.registry import SCHEMAS, execute_tool
 from app.config import settings
 from app.db import store
@@ -17,6 +17,26 @@ def _title_from(text: str) -> str:
     if len(clean) <= 42:
         return clean or "Новый чат"
     return clean[:41] + "…"
+
+
+async def _complete(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    content = ""
+    tool_calls: list[dict[str, Any]] = []
+    async for event in stream_chat(messages, tools):
+        if event["type"] == "token":
+            content += event["text"]
+        elif event["type"] == "complete":
+            content = event["content"]
+            tool_calls = event["tool_calls"]
+    content = strip_thinking(content)
+    if not tool_calls:
+        parsed, leftover = parse_text_tool_calls(content)
+        return leftover, parsed
+    _, leftover = parse_text_tool_calls(content)
+    return leftover, tool_calls
 
 
 async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, Any]]:
@@ -36,26 +56,13 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
     messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(history)
     messages.append(user_message)
+    collected: list[str] = []
 
     try:
         for _ in range(settings.max_agent_steps):
-            content = ""
-            tool_calls: list[dict[str, Any]] = []
-
-            async for event in stream_chat(messages, SCHEMAS):
-                if event["type"] == "token":
-                    content += event["text"]
-                elif event["type"] == "complete":
-                    content = event["content"]
-                    tool_calls = event["tool_calls"]
-
-            if not tool_calls:
-                parsed, leftover = parse_text_tool_calls(content)
-                tool_calls = parsed
-                content = leftover
-            elif parse_text_tool_calls(content)[0]:
-                _, leftover = parse_text_tool_calls(content)
-                content = leftover
+            content, tool_calls = await _complete(messages, SCHEMAS)
+            if not content and not tool_calls:
+                content, tool_calls = await _complete(messages, [])
 
             assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
             if tool_calls:
@@ -63,10 +70,15 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             store.add_message(session_id, assistant)
             messages.append(assistant)
 
-            if content and not tool_calls:
-                yield {"type": "token", "text": content}
-
             if not tool_calls:
+                if not content:
+                    content = (
+                        "Вот что получилось:\n\n" + "\n\n".join(collected)
+                        if collected
+                        else "Модель вернула пустой ответ. Напишите /new и спросите ещё раз."
+                    )
+                    store.add_message(session_id, {"role": "assistant", "content": content})
+                yield {"type": "token", "text": content}
                 yield {"type": "done"}
                 return
 
@@ -81,6 +93,7 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 yield {"type": "tool_start", "name": name, "args": parsed_args}
                 result = await execute_tool(name, raw_args)
                 yield {"type": "tool_result", "name": name, "result": result}
+                collected.append(f"{name}: {result}")
 
                 tool_message = {
                     "role": "tool",
@@ -91,6 +104,18 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 store.add_message(session_id, tool_message)
                 messages.append(tool_message)
 
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Ответь обычным текстом по результату инструментов. Не вызывай инструменты снова, если данных уже хватает.",
+                }
+            )
+
+        if collected:
+            yield {
+                "type": "token",
+                "text": "Вот что получилось:\n\n" + "\n\n".join(collected),
+            }
         yield {
             "type": "error",
             "message": f"Достигнут лимит шагов агента ({settings.max_agent_steps})",

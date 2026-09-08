@@ -4,6 +4,9 @@ import json
 import re
 from typing import Any
 
+_THINK_RE = re.compile(r"<(think|thinking|reasoning)>.*?</\1>", re.I | re.S)
+_TOOL_BLOCK_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.I | re.S)
+
 KNOWN_TOOLS = {
     "list_files",
     "read_file",
@@ -71,9 +74,43 @@ def _extract_objects(text: str) -> list[tuple[Any, int, int]]:
     return found
 
 
+def strip_thinking(text: str) -> str:
+    return _THINK_RE.sub("", text or "").strip()
+
+
+def _from_xml_block(block: str, index: int) -> dict[str, Any] | None:
+    for obj, _, _ in _extract_objects(block):
+        parsed = _from_obj(obj, index)
+        if parsed:
+            return parsed
+    name_match = re.search(r"\b([a-z_][a-z0-9_]*)\b", block, re.I)
+    if not name_match:
+        return None
+    args: dict[str, Any] = {}
+    for key, value in re.findall(
+        r"<arg_key>\s*(.*?)\s*</arg_key>\s*<arg_value>\s*(.*?)\s*</arg_value>",
+        block,
+        re.I | re.S,
+    ):
+        args[key] = value
+    return _as_call(name_match.group(1), args, index)
+
+
 def parse_text_tool_calls(text: str) -> tuple[list[dict[str, Any]], str]:
     if not (text or "").strip():
         return [], ""
+
+    text = strip_thinking(text)
+    xml_calls: list[dict[str, Any]] = []
+    for block in _TOOL_BLOCK_RE.findall(text):
+        parsed = _from_xml_block(block, len(xml_calls))
+        if parsed:
+            xml_calls.append(parsed)
+    if xml_calls:
+        leftover = _TOOL_BLOCK_RE.sub("", text)
+        leftover = re.sub(r"```(?:json)?", "", leftover)
+        leftover = re.sub(r"\n{3,}", "\n\n", leftover).strip()
+        return xml_calls, leftover
 
     cleaned = re.sub(r"</?tool_call>", "", text)
     objects = _extract_objects(cleaned)

@@ -94,7 +94,7 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Поиск заголовков в интернете. Для погоды не использовать — есть get_weather.",
+            "description": "Поиск в интернете: заголовки и выдержки со страниц. Для погоды не использовать.",
             "parameters": {
                 "type": "object",
                 "properties": {

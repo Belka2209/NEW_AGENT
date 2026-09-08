@@ -6,6 +6,13 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
 
 def web_search(query: str, max_results: int = 5) -> str:
     text = (query or "").strip()
@@ -22,18 +29,21 @@ def web_search(query: str, max_results: int = 5) -> str:
         rows = list(client.text(text, max_results=limit))
 
     if not rows:
-        return "Ничего не найдено. Для погоды используй get_weather."
+        return "Ничего не найдено."
 
-    lines = [
-        "Это только заголовки и короткие сниппеты, не полные статьи.",
-        "Цифр погоды здесь обычно нет — для погоды вызови get_weather.",
-        "",
-    ]
+    lines = ["Результаты поиска. Ниже выдержки со страниц — перескажи их пользователю.", ""]
+    opened = 0
     for index, row in enumerate(rows, start=1):
         title = row.get("title") or "без названия"
         href = row.get("href") or row.get("url") or ""
         body = (row.get("body") or "").strip()
-        lines.append(f"{index}. {title}\n{href}\n{body}")
+        block = [f"{index}. {title}", href, body]
+        if href and opened < 2:
+            preview = _fetch_preview(href, limit=1600)
+            if preview:
+                block.append(preview)
+                opened += 1
+        lines.append("\n".join(part for part in block if part))
     return "\n\n".join(lines)
 
 
@@ -47,7 +57,7 @@ def fetch_url(url: str) -> str:
         raw,
         timeout=20.0,
         follow_redirects=True,
-        headers={"User-Agent": "LocalAgent/1.0"},
+        headers=_HEADERS,
     )
     response.raise_for_status()
     content_type = (response.headers.get("content-type") or "").lower()
@@ -105,8 +115,26 @@ _WMO = {
 }
 
 
+def _fetch_preview(url: str, limit: int = 1600) -> str:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ""
+        response = httpx.get(url, timeout=8.0, follow_redirects=True, headers=_HEADERS)
+        response.raise_for_status()
+        text = response.text
+        if "html" in (response.headers.get("content-type") or "").lower() or text.lstrip().startswith("<"):
+            text = _html_to_text(text)
+        text = text.strip()
+        if len(text) > limit:
+            text = text[:limit] + "…"
+        return text
+    except Exception:
+        return ""
+
+
 def _http_get_json(url: str) -> dict:
-    response = httpx.get(url, timeout=15.0, follow_redirects=True)
+    response = httpx.get(url, timeout=15.0, follow_redirects=True, headers=_HEADERS)
     response.raise_for_status()
     return response.json()
 

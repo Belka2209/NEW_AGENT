@@ -13,22 +13,36 @@ class OllamaError(RuntimeError):
     pass
 
 
+def _llm_base() -> str:
+    return settings.ollama_base_url.rstrip("/").removesuffix("/v1")
+
+
 async def check_ollama() -> dict[str, Any]:
-    url = settings.ollama_base_url.rstrip("/")
+    url = _llm_base()
+    names: list[str] = []
+    last_error = None
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{url}/api/tags")
-            response.raise_for_status()
-            payload = response.json()
+            try:
+                response = await client.get(f"{url}/api/tags")
+                response.raise_for_status()
+                names = [item.get("name", "") for item in response.json().get("models", [])]
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+                response = await client.get(f"{url}/v1/models")
+                response.raise_for_status()
+                names = [item.get("id", "") for item in response.json().get("data", [])]
+                last_error = None
     except httpx.HTTPError as exc:
+        last_error = str(exc)
+
+    if last_error:
         return {
             "ok": False,
             "model": settings.ollama_model,
             "models": [],
-            "error": str(exc),
+            "error": last_error,
         }
-
-    names = [item.get("name", "") for item in payload.get("models", [])]
     return {
         "ok": True,
         "model": settings.ollama_model,
@@ -62,7 +76,7 @@ async def stream_chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
 ) -> AsyncIterator[dict[str, Any]]:
-    url = f"{settings.ollama_base_url.rstrip('/')}/v1/chat/completions"
+    url = f"{_llm_base()}/v1/chat/completions"
     body = {
         "model": settings.ollama_model,
         "messages": messages,

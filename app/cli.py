@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+
+from app.config import settings
+from app.db import store
+from app.agent.loop import run_turn
+from app.llm.client import check_ollama
+
+
+def _print(text: str) -> None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+async def _one_turn(session_id: str, text: str) -> None:
+    thinking = False
+    answered = False
+    _print("Агент: ")
+    async for event in run_turn(session_id, text):
+        kind = event.get("type")
+        if kind == "token":
+            if thinking:
+                _print("\rАгент: " + " " * 24 + "\rАгент: ")
+                thinking = False
+            _print(event.get("text") or "")
+            answered = True
+        elif kind in {"tool_start", "tool_result"}:
+            if not answered and not thinking:
+                _print("секунду, я думаю…")
+                thinking = True
+        elif kind == "error":
+            _print(f"\nОшибка: {event.get('message')}")
+    if thinking and not answered:
+        _print("\rАгент: готово, но текста нет. Спросите ещё раз.")
+    _print("\n")
+
+
+async def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdin.reconfigure(encoding="utf-8")
+
+    store.init_db()
+    health = await check_ollama()
+    session = store.create_session("Терминал")
+
+    print(f"Local Agent · терминал")
+    print(f"Модель: {settings.ollama_model}")
+    print(f"Сервер: {settings.ollama_base_url}")
+    if health.get("ok"):
+        print("LLM: подключена")
+    else:
+        print(f"LLM: нет связи ({health.get('error')})")
+        print("Запустите Ollama или LM Studio Local Server.")
+    print("Команды: /new — новый чат, /exit — выход, пустая строка — пропуск.\n")
+
+    session_id = session["id"]
+    while True:
+        try:
+            user = input("Вы: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nПока.")
+            return
+        if not user:
+            continue
+        if user in {"/exit", "/quit", "/q"}:
+            print("Пока.")
+            return
+        if user == "/new":
+            session = store.create_session("Терминал")
+            session_id = session["id"]
+            print("Новый чат.\n")
+            continue
+        if user == "/help":
+            print("/new  новый диалог\n/exit выход\n")
+            continue
+        await _one_turn(session_id, user)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

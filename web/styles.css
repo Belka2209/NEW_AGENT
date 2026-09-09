@@ -21,14 +21,18 @@ html,
 body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
 }
 
 body {
+  height: 100dvh;
+  max-height: 100dvh;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -146,15 +150,15 @@ body {
 .messages {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: none;
   padding: 28px 32px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
 .bubble {
   max-width: 760px;
+  margin: 0 0 14px;
   padding: 12px 14px;
   border-radius: 12px;
   white-space: pre-wrap;
@@ -162,12 +166,11 @@ body {
 }
 
 .bubble.user {
-  align-self: flex-end;
+  margin-left: auto;
   background: var(--user);
 }
 
 .bubble.assistant {
-  align-self: flex-start;
   background: var(--assistant);
   border: 1px solid #243028;
 }
@@ -178,7 +181,6 @@ body {
 }
 
 .bubble.tool {
-  align-self: flex-start;
   background: var(--tool);
   border: 1px solid #2a3348;
   font-size: 13px;
@@ -192,7 +194,7 @@ body {
 }
 
 .empty {
-  margin: auto;
+  margin: 24vh auto 0;
   color: var(--muted);
   text-align: center;
   max-width: 420px;

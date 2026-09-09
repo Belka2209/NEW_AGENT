@@ -21,13 +21,20 @@ function looksLikeToolJson(text) {
   return trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"');
 }
 
+function scrollToLatest() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  requestAnimationFrame(() => {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+}
+
 function addBubble(role, text, extraClass) {
   const node = document.createElement("div");
   node.className = `bubble ${role}`;
   if (extraClass) node.classList.add(extraClass);
   node.textContent = text;
   messagesEl.appendChild(node);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  scrollToLatest();
   return node;
 }
 
@@ -120,7 +127,7 @@ async function openSession(id) {
     return;
   }
   messages.forEach(displayMessage);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  scrollToLatest();
 }
 
 async function newChat() {
@@ -177,7 +184,7 @@ async function sendMessage(text) {
             gotText = true;
           }
           assistant.textContent += event.text;
-          messagesEl.scrollTop = messagesEl.scrollHeight;
+          scrollToLatest();
         } else if (event.type === "tool_start" || event.type === "tool_result") {
           if (!gotText) {
             assistant.textContent = "Секунду, я думаю…";
@@ -197,6 +204,7 @@ async function sendMessage(text) {
     sending = false;
     sendBtn.disabled = false;
     await refreshSessions({ reopen: false });
+    scrollToLatest();
   }
 }
 

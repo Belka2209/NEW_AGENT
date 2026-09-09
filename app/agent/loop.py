@@ -19,8 +19,9 @@ _BROWSER_ASK = re.compile(
     r"браузер|вкладк|chrome|"
     r"прочит\w*\s+(страниц|вкладк)|"
     r"что\s+на\s+страниц|"
+    r"на\s+страниц|"
     r"что\s+там\s+в\s+браузер|"
-    r"что\s+открыто",
+    r"что\s+открыто|отображен|сводк",
     re.I,
 )
 _BROWSER_TABS = re.compile(r"вкладк|что открыто", re.I)
@@ -41,6 +42,7 @@ _FILE_HINT = re.compile(
     re.I,
 )
 _WRITE_HINT = re.compile(r"создай|запиши|сохрани|перезапиши", re.I)
+_EDIT_HINT = re.compile(r"исправ|поправ|внеси\s+изменен|замени", re.I)
 _PATH_TOKEN = re.compile(
     r'"([^"]+)"|'
     r"'([^']+)'|"
@@ -102,8 +104,69 @@ def _extract_file_path(text: str) -> str | None:
     return found[-1] if found else None
 
 
-def _force_file_call(user_text: str) -> dict[str, Any] | None:
-    if _WRITE_HINT.search(user_text or ""):
+def _read_ok(item: str) -> bool:
+    return item.startswith("read_file:") and "строки" in item
+
+
+def _page_ok(item: str) -> bool:
+    return item.startswith("browser_content:") and "chrome-error:" not in item and len(item) > 80
+
+
+def _has_file_payload(collected: list[str]) -> bool:
+    return any(_read_ok(item) for item in collected)
+
+
+def _has_page_payload(collected: list[str]) -> bool:
+    return any(_page_ok(item) for item in collected)
+
+
+def _should_answer_now(user_text: str, collected: list[str]) -> bool:
+    if _has_file_payload(collected) and not _EDIT_HINT.search(user_text or ""):
+        return True
+    if _has_page_payload(collected) and (
+        _BROWSER_ASK.search(user_text or "") or _PROMISE_ONLY.search(user_text or "")
+    ):
+        return True
+    if any(item.startswith("edit_file: Изменено:") for item in collected):
+        return True
+    return False
+
+
+def _filter_tool_calls(
+    user_text: str,
+    calls: list[dict[str, Any]],
+    collected: list[str],
+) -> list[dict[str, Any]]:
+    if _should_answer_now(user_text, collected):
+        return []
+    target = _extract_file_path(user_text)
+    if not target or not (
+        _FILE_HINT.search(user_text or "") or _wants_code(user_text)
+    ):
+        return calls
+    kept: list[dict[str, Any]] = []
+    for call in calls:
+        name = _tool_name(call)
+        if name == "read_file":
+            raw = call.get("function", {}).get("arguments") or "{}"
+            try:
+                args = json.loads(raw) if str(raw).strip() else {}
+            except json.JSONDecodeError:
+                args = {}
+            path = str(args.get("path") or "")
+            if not path or target.lower() in path.lower() or path.lower() in target.lower():
+                kept.append(call)
+        elif name == "edit_file" and _EDIT_HINT.search(user_text or ""):
+            kept.append(call)
+    if kept:
+        return kept
+    if not _has_file_payload(collected):
+        return [_fake_call("read_file", {"path": target, "limit": 500})]
+    return []
+
+
+def _force_file_call(user_text: str, collected: list[str]) -> dict[str, Any] | None:
+    if _WRITE_HINT.search(user_text or "") or _has_file_payload(collected):
         return None
     wants_file = bool(_FILE_HINT.search(user_text or "") or _wants_code(user_text))
     if not wants_file:
@@ -111,8 +174,6 @@ def _force_file_call(user_text: str) -> dict[str, Any] | None:
     path = _extract_file_path(user_text)
     if path:
         return _fake_call("read_file", {"path": path, "limit": 500})
-    if _wants_code(user_text) and re.search(r"ревью|review|проверь", user_text or "", re.I):
-        return _fake_call("list_files", {"path": "."})
     return None
 
 
@@ -217,19 +278,24 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
 
     try:
         for _ in range(settings.max_agent_steps):
-            content, tool_calls = await _complete(messages, SCHEMAS, model=model)
+            answer_now = _should_answer_now(user_text, collected)
+            toolset = [] if answer_now else SCHEMAS
+            content, tool_calls = await _complete(messages, toolset, model=model)
             if not content and not tool_calls:
                 content, tool_calls = await _complete(messages, [], model=model)
 
+            if answer_now:
+                tool_calls = []
+            else:
+                tool_calls = _filter_tool_calls(user_text, tool_calls, collected)
+
             if not _has_file_tool(tool_calls):
-                forced_file = _force_file_call(user_text)
-                if forced_file and not any(item.startswith("read_file:") for item in collected):
+                forced_file = _force_file_call(user_text, collected)
+                if forced_file:
                     tool_calls = [forced_file]
-            if not tool_calls and not _has_browser_tool(tool_calls):
+            if not tool_calls and not _has_browser_tool(tool_calls) and not _has_page_payload(collected):
                 forced = _force_browser_call(user_text, content)
-                if forced and not any(
-                    item.startswith("browser_") for item in collected
-                ):
+                if forced and not any(item.startswith("browser_content:") for item in collected):
                     tool_calls = [forced]
 
             if not tool_calls:

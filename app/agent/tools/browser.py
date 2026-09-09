@@ -163,7 +163,14 @@ def browser_goto(url: str) -> str:
         raise ValueError("Нужен адрес http/https")
     with _lock:
         page = _page()
-        page.goto(target, wait_until="domcontentloaded", timeout=45_000)
+        try:
+            page.goto(target, wait_until="domcontentloaded", timeout=45_000)
+        except Exception as exc:
+            page.wait_for_timeout(1500)
+            return (
+                f"Переход не дождался загрузки ({exc}). "
+                f"Сейчас открыто: {page.title()}\n{page.url}"
+            )
         page.wait_for_timeout(800)
         return f"Открыто: {page.title()}\n{page.url}"
 
@@ -171,13 +178,19 @@ def browser_goto(url: str) -> str:
 def browser_content() -> str:
     with _lock:
         page = _page()
+        page.wait_for_timeout(1200)
+        try:
+            page.mouse.wheel(0, 2400)
+            page.wait_for_timeout(800)
+        except Exception:
+            pass
         title = page.title()
         url = page.url
         try:
             body = page.inner_text("body", timeout=15_000)
         except Exception:
             body = page.content()
-        return _clip(f"{title}\n{url}\n\n{body}")
+        return _clip(f"{title}\n{url}\n\n{body}", 15_000)
 
 
 def browser_click(text: str) -> str:

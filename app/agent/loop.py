@@ -35,8 +35,9 @@ def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) 
             handle.write(line)
         with (ROOT / "logs" / "agent.log").open("a", encoding="utf-8") as handle:
             handle.write("DEBUG " + line)
-    except Exception:
-        pass
+        print("DEBUG378790", hypothesis_id, location, message, flush=True)
+    except Exception as exc:
+        print("DEBUG378790_FAIL", hypothesis_id, location, type(exc).__name__, flush=True)
     # #endregion
 
 

@@ -12,13 +12,14 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db import store
-from app.agent.loop import run_turn
+from app.agent.loop import _dbg, run_turn
 from app.llm.client import check_ollama
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     store.init_db()
+    _dbg("BOOT", "main.py:lifespan", "instrumented uvicorn started", {"port": 8000})
     yield
 
 

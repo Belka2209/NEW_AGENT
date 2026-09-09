@@ -11,3 +11,4 @@ __pycache__/
 workspace/*
 !workspace/.gitkeep
 logs/*.log.*
+debug-*.log

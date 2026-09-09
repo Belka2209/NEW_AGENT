@@ -49,6 +49,12 @@ def init_db() -> None:
                 done INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS session_state (
+                session_id TEXT PRIMARY KEY,
+                last_file TEXT NOT NULL DEFAULT '',
+                last_review TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
             """
         )
 
@@ -87,6 +93,7 @@ def get_session(session_id: str) -> dict[str, Any] | None:
 
 def delete_session(session_id: str) -> bool:
     with _lock, _connect() as conn:
+        conn.execute("DELETE FROM session_state WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         return cur.rowcount > 0
@@ -161,6 +168,40 @@ def list_messages(session_id: str) -> list[dict[str, Any]]:
 
 def llm_history(session_id: str) -> list[dict[str, Any]]:
     return [item["raw"] for item in list_messages(session_id)]
+
+
+def get_session_state(session_id: str) -> dict[str, str]:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT last_file, last_review FROM session_state WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if row is None:
+        return {"last_file": "", "last_review": ""}
+    return {"last_file": row["last_file"] or "", "last_review": row["last_review"] or ""}
+
+
+def set_session_state(
+    session_id: str,
+    last_file: str | None = None,
+    last_review: str | None = None,
+) -> None:
+    current = get_session_state(session_id)
+    if last_file is not None:
+        current["last_file"] = last_file
+    if last_review is not None:
+        current["last_review"] = last_review[:4000]
+    with _lock, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO session_state (session_id, last_file, last_review)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                last_file = excluded.last_file,
+                last_review = excluded.last_review
+            """,
+            (session_id, current["last_file"], current["last_review"]),
+        )
 
 
 def add_memory(text: str) -> dict[str, Any]:

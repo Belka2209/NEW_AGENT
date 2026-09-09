@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from app import trusted
-from app.config import ROOT, settings
+from app.config import settings
 
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".idea"}
 MAX_READ_CHARS = 80_000
@@ -96,34 +96,6 @@ def safe_path(rel: str | None) -> Path:
 
     last: Path | None = None
     workspace = settings.workspace_dir.resolve()
-    # #region agent log
-    try:
-        import json
-        import time
-
-        with (ROOT / "debug-378790.log").open("a", encoding="utf-8") as handle:
-            handle.write(
-                json.dumps(
-                    {
-                        "sessionId": "378790",
-                        "runId": "pre-fix",
-                        "hypothesisId": "F",
-                        "location": "files.py:safe_path",
-                        "message": "resolve path",
-                        "data": {
-                            "raw": raw[:160],
-                            "absolute": _is_absolute(raw),
-                            "candidates": _workspace_candidates(raw)[:6],
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
     for variant in _workspace_candidates(raw):
         found = _existing_under_roots(variant)
         if found:

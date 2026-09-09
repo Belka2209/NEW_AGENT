@@ -12,14 +12,13 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db import store
-from app.agent.loop import _dbg, run_turn
+from app.agent.loop import run_turn
 from app.llm.client import check_ollama
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     store.init_db()
-    _dbg("BOOT", "main.py:lifespan", "instrumented uvicorn started", {"port": 8000})
     yield
 
 
@@ -29,6 +28,7 @@ app.mount("/static", StaticFiles(directory=settings.web_dir), name="static")
 
 class ChatIn(BaseModel):
     content: str = Field(min_length=1, max_length=20_000)
+    mode: str = Field(default="auto", pattern="^(auto|chat|code)$")
 
 
 @app.get("/")
@@ -39,6 +39,7 @@ def index() -> FileResponse:
 @app.get("/api/health")
 async def health() -> dict:
     status = await check_ollama()
+    status["code_model"] = settings.ollama_code_model
     return status
 
 
@@ -72,7 +73,7 @@ async def send_message(session_id: str, body: ChatIn) -> StreamingResponse:
         raise HTTPException(status_code=404, detail="Диалог не найден")
 
     async def events() -> AsyncIterator[bytes]:
-        async for event in run_turn(session_id, body.content.strip()):
+        async for event in run_turn(session_id, body.content.strip(), mode=body.mode):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
 
     return StreamingResponse(

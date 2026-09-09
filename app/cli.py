@@ -14,11 +14,11 @@ def _print(text: str) -> None:
     sys.stdout.flush()
 
 
-async def _one_turn(session_id: str, text: str) -> None:
+async def _one_turn(session_id: str, text: str, mode: str = "auto") -> None:
     thinking = False
     answered = False
     _print("Агент: ")
-    async for event in run_turn(session_id, text):
+    async for event in run_turn(session_id, text, mode=mode):
         kind = event.get("type")
         if kind == "token":
             if thinking:
@@ -55,9 +55,10 @@ async def main() -> None:
     else:
         print(f"LLM: нет связи ({health.get('error')})")
         print("Запустите Ollama или LM Studio Local Server.")
-    print("Команды: /new — новый чат, /exit — выход, пустая строка — пропуск.\n")
+    print("Команды: /new /chat /code /auto /exit. Пустая строка — пропуск.\n")
 
     session_id = session["id"]
+    mode = "auto"
     while True:
         try:
             user = input("Вы: ").strip()
@@ -75,9 +76,13 @@ async def main() -> None:
             print("Новый чат.\n")
             continue
         if user == "/help":
-            print("/new  новый диалог\n/exit выход\n")
+            print("/new новый диалог\n/chat /code /auto режим\n/exit выход\n")
             continue
-        await _one_turn(session_id, user)
+        if user in {"/chat", "/code", "/auto"}:
+            mode = user[1:]
+            print(f"Режим: {mode}\n")
+            continue
+        await _one_turn(session_id, user, mode=mode)
 
 
 if __name__ == "__main__":

@@ -5,9 +5,26 @@ const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const statusEl = document.getElementById("status");
 const modelLabel = document.getElementById("model-label");
+const modeHint = document.getElementById("mode-hint");
+
+const MODE_HINTS = {
+  auto: "Авто: чат или код по тексту",
+  chat: "Чат: погода, браузер, Telegram, память",
+  code: "Код: ревью, правки, git, команды",
+};
 
 let currentId = null;
 let sending = false;
+let currentMode = localStorage.getItem("agentMode") || "auto";
+
+function setMode(mode) {
+  currentMode = mode;
+  localStorage.setItem("agentMode", mode);
+  document.querySelectorAll(".mode").forEach((btn) => {
+    btn.classList.toggle("on", btn.dataset.mode === mode);
+  });
+  if (modeHint) modeHint.textContent = MODE_HINTS[mode] || MODE_HINTS.auto;
+}
 
 function escapeHtml(text) {
   return String(text)
@@ -41,7 +58,8 @@ function addBubble(role, text, extraClass) {
 function showEmpty() {
   messagesEl.innerHTML = `
     <div class="empty">
-      Напишите задачу — агент может искать в сети, читать и писать файлы в workspace/ и запускать команды.
+      Авто выберет чат или код. «Ревью test.py» — режим кода: файл дочитывается, затем ревью.
+      Погода и браузер — чат. Можно переключить вручную слева.
     </div>`;
 }
 
@@ -58,7 +76,11 @@ async function api(path, options) {
 async function loadHealth() {
   try {
     const data = await api("/api/health");
-    modelLabel.textContent = data.model || "модель не задана";
+    const chatModel = data.model || "модель не задана";
+    const codeModel = data.code_model || chatModel;
+    modelLabel.textContent = codeModel && codeModel !== chatModel
+      ? `${chatModel} · код ${codeModel}`
+      : chatModel;
     if (data.ok) {
       statusEl.className = "status ok";
       const present = (data.models || []).includes(data.model);
@@ -157,7 +179,7 @@ async function sendMessage(text) {
     const response = await fetch(`/api/sessions/${currentId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: text }),
+      body: JSON.stringify({ content: text, mode: currentMode }),
     });
     if (!response.ok || !response.body) {
       throw new Error(await response.text());
@@ -189,6 +211,10 @@ async function sendMessage(text) {
           if (!gotText) {
             assistant.textContent = "Секунду, я думаю…";
             assistant.classList.add("thinking");
+          }
+        } else if (event.type === "meta") {
+          if (event.model) {
+            modelLabel.textContent = `${event.mode === "code" ? "код" : "чат"} · ${event.model}`;
           }
         } else if (event.type === "title") {
           renderSessions(await api("/api/sessions"));
@@ -223,6 +249,10 @@ input.addEventListener("keydown", (event) => {
 });
 
 document.getElementById("new-chat").addEventListener("click", newChat);
+document.querySelectorAll(".mode").forEach((btn) => {
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+});
+setMode(currentMode);
 
 loadHealth();
 refreshSessions().catch((err) => {

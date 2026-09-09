@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local Agent</title>
-  <link rel="stylesheet" href="/static/styles.css?v=3">
+  <link rel="stylesheet" href="/static/styles.css?v=4">
 </head>
 <body>
   <aside class="sidebar">
@@ -16,6 +16,12 @@
       </div>
     </div>
     <button class="primary" id="new-chat" type="button">Новый чат</button>
+    <div class="mode-switch" role="group" aria-label="Режим">
+      <button type="button" class="mode on" data-mode="auto">Авто</button>
+      <button type="button" class="mode" data-mode="chat">Чат</button>
+      <button type="button" class="mode" data-mode="code">Код</button>
+    </div>
+    <div class="muted" id="mode-hint">Авто: чат или код по тексту</div>
     <div class="session-list" id="sessions"></div>
     <div class="status" id="status">Проверка Ollama…</div>
   </aside>
@@ -28,6 +34,6 @@
     </form>
   </main>
 
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

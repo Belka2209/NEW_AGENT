@@ -464,6 +464,56 @@ SCHEMAS: list[dict[str, Any]] = [
     },
 ]
 
+CODE_TOOL_NAMES = {
+    "list_files",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "search_files",
+    "run_command",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "trust_folder",
+    "untrust_folder",
+    "trusted_list",
+}
+CHAT_TOOL_NAMES = {
+    "current_datetime",
+    "get_weather",
+    "web_search",
+    "hh_search",
+    "browser_start",
+    "browser_status",
+    "browser_goto",
+    "browser_content",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_search",
+    "fetch_url",
+    "memory_add",
+    "memory_list",
+    "memory_delete",
+    "reminder_add",
+    "reminder_list",
+    "reminder_done",
+    "telegram_status",
+    "telegram_chats",
+    "telegram_send",
+    "trust_folder",
+    "untrust_folder",
+    "trusted_list",
+    "list_files",
+    "read_file",
+}
+
+
+def schemas_for(mode: str) -> list[dict[str, Any]]:
+    names = CODE_TOOL_NAMES if mode == "code" else CHAT_TOOL_NAMES
+    return [item for item in SCHEMAS if item["function"]["name"] in names]
+
+
 _HANDLERS: dict[str, ToolFn] = {
     "list_files": files.list_files,
     "read_file": files.read_file,

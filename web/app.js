@@ -90,10 +90,11 @@ function renderSessions(items) {
   }
 }
 
-async function refreshSessions() {
+async function refreshSessions({ reopen = true } = {}) {
   const items = await api("/api/sessions");
   if (!currentId && items.length) currentId = items[0].id;
   renderSessions(items);
+  if (!reopen) return;
   if (currentId) await openSession(currentId);
   else showEmpty();
 }
@@ -195,7 +196,7 @@ async function sendMessage(text) {
   } finally {
     sending = false;
     sendBtn.disabled = false;
-    await refreshSessions();
+    await refreshSessions({ reopen: false });
   }
 }
 

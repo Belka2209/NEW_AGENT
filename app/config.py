@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     telegram_chats: str = ""
     browser_cdp_url: str = "http://127.0.0.1:9222"
     trusted_folders: str = ""
+    verify_command: str = ""
 
     model_config = SettingsConfigDict(
         env_file=ROOT / ".env",

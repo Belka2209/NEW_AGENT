@@ -150,7 +150,19 @@ def _resolve_file(path: str) -> Path:
     raise WorkspaceError(f"Файл не найден: {path}")
 
 
-def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
+def resolve_workdir(path: str) -> str:
+    target = _resolve_file(path)
+    current = target.parent
+    for _ in range(16):
+        if (current / ".git").exists():
+            return str(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    return str(target.parent)
+
+
+def read_file(path: str, offset: int = 1, limit: int = 500) -> str:
     target = _resolve_file(path)
     raw = target.read_bytes()
     if b"\x00" in raw[:4096]:

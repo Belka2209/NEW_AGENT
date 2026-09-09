@@ -12,6 +12,8 @@
 - История чатов (SQLite)
 - Файлы и команды в `workspace/` и в доверенных папках из `.env`
 - Ревью и правки кода (`edit_file`), на задачах про код — модель `OLLAMA_CODE_MODEL`
+- Git только на чтение: `git_status`, `git_diff`, `git_log`
+- После правки — опциональный `VERIFY_COMMAND` из `.env`
 - Поиск в интернете (DuckDuckGo)
 - Вакансии на hh.ru (официальный API, без Chrome)
 - Погода (Open-Meteo)
@@ -214,6 +216,7 @@ Get-Content D:\MY_AGENT\NEW_AGENT\data\agent.log -Tail 50
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen2.5-coder:14b
 OLLAMA_CODE_MODEL=qwen2.5-coder:14b
+VERIFY_COMMAND=python -m compileall .
 MAX_AGENT_STEPS=12
 TERMINAL_TIMEOUT=45
 TELEGRAM_BOT_TOKEN=
@@ -245,6 +248,14 @@ OLLAMA_CODE_MODEL=qwen2.5-coder:14b
 ```
 
 Две модели сразу в VRAM держать не нужно: Ollama подгружает coder на ход с кодом. Если coder ещё не скачан: `ollama pull qwen2.5-coder:14b`.
+
+После `edit_file` можно сразу прогнать проверку — в `.env`:
+
+```
+VERIFY_COMMAND=python -m compileall .
+```
+
+Пустая строка — не гонять. «Что изменено в репозитории» — агент вызывает `git_status` / `git_diff` / `git_log`, без commit и push.
 
 ## Telegram-бот (необязательно)
 

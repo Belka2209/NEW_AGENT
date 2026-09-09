@@ -8,6 +8,7 @@ from app.agent.tools import (
     browser,
     clock,
     files,
+    git,
     hh,
     memory,
     reminders,
@@ -134,6 +135,45 @@ SCHEMAS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status",
+            "description": "git status --short --branch. Только чтение. path — корень или файл репозитория.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Папка или файл внутри репозитория"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_diff",
+            "description": "git diff HEAD. Только чтение, без commit/push.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": "Последние 8 коммитов (oneline). Только чтение.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                },
             },
         },
     },
@@ -431,6 +471,9 @@ _HANDLERS: dict[str, ToolFn] = {
     "edit_file": files.edit_file,
     "search_files": files.search_files,
     "run_command": terminal.run_command,
+    "git_status": git.git_status,
+    "git_diff": git.git_diff,
+    "git_log": git.git_log,
     "trust_folder": trusted.trust_folder,
     "untrust_folder": trusted.untrust_folder,
     "trusted_list": trusted.trusted_list,

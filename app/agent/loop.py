@@ -7,6 +7,7 @@ from typing import Any
 
 from app.agent.prompts import build_system_prompt
 from app.agent.tool_parse import parse_text_tool_calls, strip_thinking
+from app.agent.tools import files
 from app.agent.tools.registry import SCHEMAS, execute_tool
 from app.config import settings
 from app.db import store
@@ -104,12 +105,46 @@ def _extract_file_path(text: str) -> str | None:
 def _force_file_call(user_text: str) -> dict[str, Any] | None:
     if _WRITE_HINT.search(user_text or ""):
         return None
-    if not _FILE_HINT.search(user_text or ""):
+    wants_file = bool(_FILE_HINT.search(user_text or "") or _wants_code(user_text))
+    if not wants_file:
         return None
     path = _extract_file_path(user_text)
-    if not path:
-        return None
-    return _fake_call("read_file", {"path": path})
+    if path:
+        return _fake_call("read_file", {"path": path, "limit": 500})
+    if _wants_code(user_text) and re.search(r"ревью|review|проверь", user_text or "", re.I):
+        return _fake_call("list_files", {"path": "."})
+    return None
+
+
+def _followup_after_tools(code_task: bool, collected: list[str]) -> str:
+    last = collected[-1] if collected else ""
+    if last.startswith("edit_file:") and ("не найден" in last.lower() or "old_text" in last):
+        return (
+            "Тот же запрос: фрагмент для правки не найден. "
+            "Снова вызови read_file и edit_file с точным текстом. Не здоровайся."
+        )
+    if code_task:
+        return (
+            "Тот же запрос про код. Ответь по результату инструментов: "
+            "ревью по строкам или что изменено. Не здоровайся и не пиши, что нет контекста. "
+            "Не вызывай инструменты снова, если данных хватает."
+        )
+    return (
+        "Тот же запрос. Перескажи результат инструментов по делу. "
+        "Не здоровайся и не пиши, что нет контекста. "
+        "Не вызывай инструменты снова, если данных хватает."
+    )
+
+
+async def _run_verify(path: str) -> str:
+    command = (settings.verify_command or "").strip()
+    if not command:
+        return ""
+    try:
+        cwd = files.resolve_workdir(path)
+    except Exception:
+        cwd = "."
+    return await execute_tool("run_command", {"command": command, "cwd": cwd})
 
 
 def _force_browser_call(user_text: str, content: str) -> dict[str, Any] | None:
@@ -235,14 +270,29 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 store.add_message(session_id, tool_message)
                 messages.append(tool_message)
 
+                if (
+                    name == "edit_file"
+                    and result.startswith("Изменено:")
+                    and (settings.verify_command or "").strip()
+                ):
+                    verify = await _run_verify(str(parsed_args.get("path") or ""))
+                    if verify:
+                        yield {"type": "tool_start", "name": "run_command", "args": {"command": settings.verify_command}}
+                        yield {"type": "tool_result", "name": "run_command", "result": verify}
+                        collected.append(f"run_command: {verify}")
+                        verify_message = {
+                            "role": "tool",
+                            "tool_call_id": "call_verify_auto",
+                            "name": "run_command",
+                            "content": verify,
+                        }
+                        store.add_message(session_id, verify_message)
+                        messages.append(verify_message)
+
             messages.append(
                 {
-                    "role": "user",
-                    "content": (
-                        "Это продолжение того же запроса. Перескажи результат инструментов "
-                        "пользователю по делу. Не здоровайся, не пиши что нет контекста "
-                        "и не предлагай меню. Не вызывай инструменты снова, если данных хватает."
-                    ),
+                    "role": "system",
+                    "content": _followup_after_tools(code_task, collected),
                 }
             )
 

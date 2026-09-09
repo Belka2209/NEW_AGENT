@@ -4,7 +4,18 @@ import asyncio
 import json
 from typing import Any, Callable
 
-from app.agent.tools import browser, clock, files, hh, memory, reminders, telegram, terminal, web
+from app.agent.tools import (
+    browser,
+    clock,
+    files,
+    hh,
+    memory,
+    reminders,
+    telegram,
+    terminal,
+    trusted,
+    web,
+)
 
 ToolFn = Callable[..., str]
 
@@ -13,11 +24,14 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "Список файлов и папок внутри workspace/. path относительный.",
+            "description": "Список файлов. path: относительный в workspace/ или полный путь внутри доверенной папки.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Относительный путь, по умолчанию корень workspace"},
+                    "path": {
+                        "type": "string",
+                        "description": "Относительный путь в workspace или полный путь в доверенной папке",
+                    },
                 },
             },
         },
@@ -26,7 +40,7 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Прочитать текстовый файл из workspace/ с нумерацией строк.",
+            "description": "Прочитать текстовый файл из workspace/ или доверенной папки.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -42,7 +56,7 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Создать или перезаписать текстовый файл внутри workspace/.",
+            "description": "Создать или перезаписать текстовый файл в workspace/ или доверенной папке.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -57,12 +71,15 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_files",
-            "description": "Поиск подстроки в текстовых файлах workspace/.",
+            "description": "Поиск подстроки в текстовых файлах workspace/ или доверенной папки.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "path": {"type": "string", "description": "Где искать, по умолчанию весь workspace"},
+                    "path": {
+                        "type": "string",
+                        "description": "Где искать: workspace или полный путь доверенной папки",
+                    },
                 },
                 "required": ["query"],
             },
@@ -80,14 +97,57 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "Выполнить команду в workspace/ (PowerShell на Windows). Без интерактива.",
+            "description": "Выполнить команду (PowerShell на Windows). cwd — workspace или доверенная папка.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string"},
+                    "cwd": {
+                        "type": "string",
+                        "description": "Рабочая папка: пусто = workspace, иначе полный путь из доверенных",
+                    },
                 },
                 "required": ["command"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trust_folder",
+            "description": (
+                "Добавить папку в TRUSTED_FOLDERS (.env). "
+                "Вызывай, когда пользователь дал полный путь и просит там работать."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Полный путь к папке"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "untrust_folder",
+            "description": "Убрать папку из доверенных по полному пути или имени (например Downloads).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Полный путь или имя папки"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trusted_list",
+            "description": "Показать доверенные папки.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -341,6 +401,9 @@ _HANDLERS: dict[str, ToolFn] = {
     "write_file": files.write_file,
     "search_files": files.search_files,
     "run_command": terminal.run_command,
+    "trust_folder": trusted.trust_folder,
+    "untrust_folder": trusted.untrust_folder,
+    "trusted_list": trusted.trusted_list,
     "web_search": web.web_search,
     "current_datetime": clock.current_datetime,
     "get_weather": web.get_weather,

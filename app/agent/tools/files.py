@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+from app import trusted
 from app.config import settings
 
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".idea"}
@@ -14,12 +16,30 @@ class WorkspaceError(ValueError):
     pass
 
 
+def _is_absolute(raw: str) -> bool:
+    if Path(raw).is_absolute():
+        return True
+    return len(raw) >= 2 and raw[1] == ":"
+
+
 def safe_path(rel: str | None) -> Path:
+    raw = (rel or ".").strip().strip('"').strip("'")
+    raw = os.path.expandvars(os.path.expanduser(raw))
+    if not raw:
+        raw = "."
+    if _is_absolute(raw):
+        candidate = Path(raw).resolve()
+        if not trusted.is_inside_trusted(candidate):
+            raise WorkspaceError(
+                f"Путь вне доверенных папок: {candidate}. "
+                "Сначала trust_folder с этой папкой."
+            )
+        return candidate
+
     workspace = settings.workspace_dir.resolve()
-    raw = (rel or ".").replace("\\", "/").strip()
-    if raw.startswith("/") or raw.startswith("~") or (len(raw) >= 2 and raw[1] == ":"):
-        raise WorkspaceError("Путь должен быть относительным внутри workspace/")
-    candidate = (workspace / raw).resolve()
+    if raw.startswith("/") or raw.startswith("~"):
+        raise WorkspaceError("Относительный путь — только внутри workspace/")
+    candidate = (workspace / raw.replace("\\", "/")).resolve()
     try:
         candidate.relative_to(workspace)
     except ValueError as exc:
@@ -28,10 +48,7 @@ def safe_path(rel: str | None) -> Path:
 
 
 def _rel(path: Path) -> str:
-    workspace = settings.workspace_dir.resolve()
-    if path == workspace:
-        return "."
-    return path.relative_to(workspace).as_posix()
+    return trusted.display_path(path)
 
 
 def list_files(path: str = ".") -> str:
@@ -76,10 +93,11 @@ def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
 
 def write_file(path: str, content: str) -> str:
     target = safe_path(path)
-    workspace = settings.workspace_dir.resolve()
-    if target == workspace:
-        raise WorkspaceError("Нельзя перезаписать корень workspace/")
+    if target.is_dir() or any(target == root for root in trusted.all_roots()):
+        raise WorkspaceError("Нельзя перезаписать корень папки")
     target.parent.mkdir(parents=True, exist_ok=True)
+    if not trusted.is_inside_trusted(target):
+        raise WorkspaceError("Путь вне доверенных папок")
     target.write_text(content, encoding="utf-8")
     return f"Записано: {_rel(target)} ({len(content)} символов)"
 

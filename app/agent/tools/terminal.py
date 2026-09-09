@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 
+from app.agent.tools.files import safe_path
 from app.config import settings
 
 BLOCKED = [
@@ -22,7 +23,7 @@ BLOCKED = [
 ]
 
 
-def run_command(command: str) -> str:
+def run_command(command: str, cwd: str = "") -> str:
     text = (command or "").strip()
     if not text:
         raise ValueError("Пустая команда")
@@ -32,7 +33,10 @@ def run_command(command: str) -> str:
             raise ValueError("Команда заблокирована как опасная")
 
     timeout = settings.terminal_timeout
-    cwd = str(settings.workspace_dir)
+    workdir = safe_path(cwd or ".")
+    if not workdir.is_dir():
+        raise ValueError(f"Нет такой папки: {workdir}")
+    cwd = str(workdir)
     if sys.platform == "win32":
         argv = ["powershell", "-NoProfile", "-NonInteractive", "-Command", text]
     else:

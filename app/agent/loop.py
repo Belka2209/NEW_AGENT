@@ -63,8 +63,15 @@ _PROMISE_ONLY = re.compile(
     r"сейчас прочитаю|сейчас посмотрю|открою вкладк|сейчас открою",
     re.I,
 )
+_STALL_REPLY = re.compile(
+    r"буду (дочитыв|ожидать)|ожидать завершения|"
+    r"пока (он|файл) не будет полностью|"
+    r"после этого сразу напишу|"
+    r"напишу ревью по номерам строк",
+    re.I,
+)
 _FILE_HINT = re.compile(
-    r"файл|проверь|прочит|открой|покажи|что\s+там\s+за\s+код|путь|адрес",
+    r"файл|проверь|прочит|открой|покажи|ревью|review|что\s+там\s+за\s+код|путь|адрес",
     re.I,
 )
 _WRITE_HINT = re.compile(r"создай|запиши|сохрани|перезапиши", re.I)
@@ -269,14 +276,10 @@ def _followup_after_tools(code_task: bool, collected: list[str]) -> str:
             "Снова вызови read_file и edit_file с точным текстом. Не здоровайся."
         )
     if code_task:
-        if not _file_fully_read(collected):
-            return (
-                "Файл ещё не дочитан. Не отвечай пользователю и не спрашивай имя файла. "
-                "Дочитай оставшиеся строки через read_file с offset."
-            )
         return (
-            "Файл уже прочитан. Сразу напиши ревью по номерам строк: классы, риски, баги. "
-            "Не здоровайся, не спрашивай имя файла и не спрашивай, что делать."
+            "Файл уже в результатах инструментов. Сразу напиши готовое ревью: "
+            "что за файл, затем замечания с номерами строк. "
+            "Не пиши, что будешь читать или ждать. Не спрашивай имя файла."
         )
     return (
         "Тот же запрос. Перескажи результат инструментов по делу. "
@@ -302,6 +305,33 @@ def _force_browser_call(user_text: str, content: str) -> dict[str, Any] | None:
         return None
     name = "browser_status" if _BROWSER_TABS.search(user_text) else "browser_content"
     return _fake_call(name)
+
+
+def _thin_code_answer(text: str, code_task: bool) -> bool:
+    if not code_task:
+        return False
+    clean = (text or "").strip()
+    return len(clean) < 200 or bool(_STALL_REPLY.search(clean))
+
+
+async def _force_review(user_text: str, collected: list[str], model: str) -> str:
+    chunks: list[str] = []
+    for item in collected:
+        if item.startswith("read_file:"):
+            chunks.append(item.split(":", 1)[1].lstrip())
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты разработчик. Ниже уже полный текст файла. "
+                "Напиши ревью на языке пользователя: что за файл, затем список замечаний с номерами строк. "
+                "Запрещено писать, что будешь читать, дочитывать или ждать."
+            ),
+        },
+        {"role": "user", "content": f"{user_text}\n\n" + "\n\n".join(chunks)},
+    ]
+    content, _ignored = await _complete(messages, [], model=model)
+    return content
 
 
 def _final_text(content: str, collected: list[str]) -> str:
@@ -428,28 +458,14 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             )
 
             if not tool_calls:
-                if (
-                    code_task
-                    and _has_file_payload(collected)
-                    and len((content or "").strip()) < 200
-                ):
+                if _thin_code_answer(content, code_task) and _has_file_payload(collected):
                     _dbg(
-                        "E",
+                        "H",
                         "loop.py:short_retry",
-                        "retry short answer",
+                        "clean-slate review",
                         {"content_head": (content or "")[:160], "content_len": len(content or "")},
                     )
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "Это не ревью. Напиши ревью по уже прочитанному коду: "
-                                "классы, риски, баги с номерами строк. "
-                                "Не спрашивай что делать и не проси имя файла."
-                            ),
-                        }
-                    )
-                    content, _ignored = await _complete(messages, [], model=model)
+                    content = await _force_review(user_text, collected, model)
                 before = content or ""
                 content = _final_text(content, collected)
                 if not content:
@@ -532,12 +548,20 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                         store.add_message(session_id, verify_message)
                         messages.append(verify_message)
 
-            messages.append(
-                {
-                    "role": "system",
-                    "content": _followup_after_tools(code_task, collected),
-                }
-            )
+            if _needs_full_file(user_text) and not _file_fully_read(collected):
+                _dbg(
+                    "H",
+                    "loop.py:skip_followup",
+                    "skip followup until file is complete",
+                    {"covered": (_last_read_meta(collected) or {}).get("end")},
+                )
+            else:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": _followup_after_tools(code_task, collected),
+                    }
+                )
 
         if collected:
             yield {

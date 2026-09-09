@@ -244,8 +244,20 @@ SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "browser_search",
+            "description": "Искать запрос в Chrome (Яндекс) и вернуть текст выдачи. Если web_search пуст — вызови это.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "browser_goto",
-            "description": "Открыть URL в текущей вкладке Chrome (Bitrix, hh.ru и т.д.).",
+            "description": "Открыть любой URL в текущей вкладке Chrome.",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
@@ -342,6 +354,7 @@ _HANDLERS: dict[str, ToolFn] = {
     "browser_click": browser.browser_click,
     "browser_type": browser.browser_type,
     "browser_press": browser.browser_press,
+    "browser_search": browser.browser_search,
 }
 
 

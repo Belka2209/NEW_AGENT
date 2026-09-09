@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from urllib.parse import quote_plus
 
 from app.config import settings
 
@@ -32,7 +33,7 @@ def _connect():
         raise RuntimeError(
             "Chrome не доступен на "
             f"{settings.browser_cdp_url}. Закройте все окна Chrome и запустите "
-            r".\chrome-debug.ps1 — затем откройте Bitrix или hh.ru и войдите."
+            r".\chrome-debug.ps1 — затем откройте нужные сайты и войдите."
         ) from exc
     return _browser
 
@@ -115,6 +116,25 @@ def browser_type(text: str, field: str = "") -> str:
             page.get_by_text(field.strip(), exact=False).first.click(timeout=10_000)
         page.keyboard.type(value, delay=20)
         return f"Введено {len(value)} символов."
+
+
+def browser_search(query: str) -> str:
+    text = (query or "").strip()
+    if not text:
+        raise ValueError("Пустой поисковый запрос")
+    url = f"https://yandex.ru/search/?text={quote_plus(text)}"
+    with _lock:
+        page = _page()
+        page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+        page.wait_for_timeout(1500)
+        title = page.title()
+        try:
+            body = page.inner_text("body", timeout=15_000)
+        except Exception:
+            body = page.content()
+        return _clip(
+            f"Поиск в Chrome (Яндекс): {text}\n{title}\n{page.url}\n\n{body}"
+        )
 
 
 def browser_press(key: str = "Enter") -> str:

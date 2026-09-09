@@ -29,9 +29,23 @@ def web_search(query: str, max_results: int = 5) -> str:
         rows = list(client.text(text, max_results=limit))
 
     if not rows:
-        return "Ничего не найдено."
+        try:
+            from app.agent.tools.browser import browser_search
 
-    lines = ["Результаты поиска. Ниже выдержки со страниц — перескажи их пользователю.", ""]
+            extra = browser_search(text)
+            return (
+                "Веб-поиск ничего не дал. Открыл тот же запрос в Chrome:\n\n" + extra
+            )
+        except Exception as exc:
+            return (
+                "Веб-поиск ничего не нашёл. В Chrome тоже не вышло: "
+                f"{exc}. Запустите chrome-debug.ps1 и повторите."
+            )
+
+    lines = [
+        "Результаты поиска. Если здесь нет нужных фактов — вызови browser_search с тем же запросом.",
+        "",
+    ]
     opened = 0
     for index, row in enumerate(rows, start=1):
         title = row.get("title") or "без названия"

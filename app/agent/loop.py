@@ -9,10 +9,35 @@ from app.agent.prompts import build_system_prompt
 from app.agent.tool_parse import parse_text_tool_calls, strip_thinking
 from app.agent.tools import files
 from app.agent.tools.registry import SCHEMAS, execute_tool
-from app.config import settings
+from app.config import ROOT, settings
 from app.db import store
 from app.llm.client import OllamaError, stream_chat
 from app.logutil import get_logger
+
+
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        import time
+        from pathlib import Path
+
+        payload = {
+            "sessionId": "378790",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        line = json.dumps(payload, ensure_ascii=False) + "\n"
+        with (ROOT / "debug-378790.log").open("a", encoding="utf-8") as handle:
+            handle.write(line)
+        with (ROOT / "logs" / "agent.log").open("a", encoding="utf-8") as handle:
+            handle.write("DEBUG " + line)
+    except Exception:
+        pass
+    # #endregion
 
 
 _BROWSER_ASK = re.compile(
@@ -268,6 +293,18 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
     model = _turn_model(user_text)
     code_task = _wants_code(user_text)
     log.info("turn session=%s model=%s user=%s", session_id, model, user_text[:300])
+    _dbg(
+        "B",
+        "loop.py:run_turn",
+        "turn start",
+        {
+            "model": model,
+            "code_task": code_task,
+            "extracted": _extract_file_path(user_text),
+            "file_hint": bool(_FILE_HINT.search(user_text or "")),
+            "user": user_text[:120],
+        },
+    )
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": build_system_prompt(code_task=code_task)}
@@ -283,11 +320,13 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             content, tool_calls = await _complete(messages, toolset, model=model)
             if not content and not tool_calls:
                 content, tool_calls = await _complete(messages, [], model=model)
+            after_complete = [_tool_name(call) for call in tool_calls]
 
             if answer_now:
                 tool_calls = []
             else:
                 tool_calls = _filter_tool_calls(user_text, tool_calls, collected)
+            after_filter = [_tool_name(call) for call in tool_calls]
 
             if not _has_file_tool(tool_calls):
                 forced_file = _force_file_call(user_text, collected)
@@ -297,11 +336,39 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 forced = _force_browser_call(user_text, content)
                 if forced and not any(item.startswith("browser_content:") for item in collected):
                     tool_calls = [forced]
+            after_force = [_tool_name(call) for call in tool_calls]
+            _dbg(
+                "A",
+                "loop.py:step",
+                "tool decision",
+                {
+                    "answer_now": answer_now,
+                    "toolset_empty": not toolset,
+                    "content_len": len(content or ""),
+                    "after_complete": after_complete,
+                    "after_filter": after_filter,
+                    "after_force": after_force,
+                    "has_file_payload": _has_file_payload(collected),
+                    "hypothesisD_parsed_tools": bool(after_complete) and not toolset,
+                },
+            )
 
             if not tool_calls:
+                before = content or ""
                 content = _final_text(content, collected)
                 if not content:
                     content = "Модель вернула пустой ответ. Напишите /new и спросите ещё раз."
+                _dbg(
+                    "E",
+                    "loop.py:final",
+                    "final answer",
+                    {
+                        "before_len": len(before),
+                        "after_len": len(content or ""),
+                        "replaced": before != content,
+                        "collected": [item.split(":", 1)[0] for item in collected],
+                    },
+                )
                 store.add_message(session_id, {"role": "assistant", "content": content})
                 yield {"type": "token", "text": content}
                 yield {"type": "done"}
@@ -326,6 +393,17 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 log.info("tool_result %s %s", name, result[:400])
                 yield {"type": "tool_result", "name": name, "result": result}
                 collected.append(f"{name}: {result}")
+                _dbg(
+                    "A",
+                    "loop.py:tool_result",
+                    "tool finished",
+                    {
+                        "name": name,
+                        "ok_read": _read_ok(f"{name}: {result}"),
+                        "answer_now": _should_answer_now(user_text, collected),
+                        "result_head": result[:80],
+                    },
+                )
 
                 tool_message = {
                     "role": "tool",

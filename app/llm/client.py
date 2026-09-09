@@ -75,10 +75,11 @@ def _accumulate_tool_calls(
 async def stream_chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    model: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     url = f"{_llm_base()}/v1/chat/completions"
     body = {
-        "model": settings.ollama_model,
+        "model": (model or settings.ollama_model).strip() or settings.ollama_model,
         "messages": messages,
         "stream": True,
         "tools": tools,

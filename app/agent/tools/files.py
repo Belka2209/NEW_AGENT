@@ -22,6 +22,61 @@ def _is_absolute(raw: str) -> bool:
     return len(raw) >= 2 and raw[1] == ":"
 
 
+def _workspace_candidates(raw: str) -> list[str]:
+    text = raw.replace("\\", "/").strip()
+    if not text or text == ".":
+        return ["."]
+    variants = [text]
+    current = text
+    while current.lower() == "workspace" or current.lower().startswith("workspace/"):
+        current = "" if current.lower() == "workspace" else current[10:]
+        current = current or "."
+        if current not in variants:
+            variants.append(current)
+        if current == ".":
+            break
+    return variants
+
+
+def _find_all_by_name(name: str) -> list[Path]:
+    needle = name.replace("\\", "/").rstrip("/").split("/")[-1]
+    if not needle or needle in {".", ".."}:
+        return []
+    found: list[Path] = []
+    seen: set[str] = set()
+    for root in trusted.all_roots():
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [item for item in dirnames if item not in SKIP_DIRS]
+            for filename in filenames:
+                if filename.casefold() != needle.casefold():
+                    continue
+                item = Path(dirpath, filename)
+                if not trusted.is_inside_trusted(item):
+                    continue
+                key = str(item.resolve()).casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(item)
+                if len(found) >= 20:
+                    return found
+    return found
+
+
+def _existing_under_roots(relative: str) -> Path | None:
+    for root in trusted.all_roots():
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            continue
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def safe_path(rel: str | None) -> Path:
     raw = (rel or ".").strip().strip('"').strip("'")
     raw = os.path.expandvars(os.path.expanduser(raw))
@@ -36,15 +91,23 @@ def safe_path(rel: str | None) -> Path:
             )
         return candidate
 
-    workspace = settings.workspace_dir.resolve()
     if raw.startswith("/") or raw.startswith("~"):
-        raise WorkspaceError("Относительный путь — только внутри workspace/")
-    candidate = (workspace / raw.replace("\\", "/")).resolve()
-    try:
-        candidate.relative_to(workspace)
-    except ValueError as exc:
-        raise WorkspaceError("Путь выходит за пределы workspace/") from exc
-    return candidate
+        raise WorkspaceError("Относительный путь — только внутри workspace/ или доверенной папки")
+
+    last: Path | None = None
+    workspace = settings.workspace_dir.resolve()
+    for variant in _workspace_candidates(raw):
+        found = _existing_under_roots(variant)
+        if found:
+            return found
+        candidate = (workspace / variant).resolve()
+        try:
+            candidate.relative_to(workspace)
+            last = candidate
+        except ValueError:
+            continue
+
+    return last or workspace
 
 
 def _rel(path: Path) -> str:
@@ -59,23 +122,36 @@ def list_files(path: str = ".") -> str:
         return _rel(root)
 
     items: list[str] = []
-    for child in sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-        if child.name in SKIP_DIRS:
-            continue
-        suffix = "/" if child.is_dir() else ""
-        items.append(f"{_rel(child)}{suffix}")
-        if len(items) >= MAX_LIST_ITEMS:
-            items.append("… список обрезан")
-            break
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(item for item in dirnames if item not in SKIP_DIRS)
+        for filename in sorted(filenames):
+            items.append(_rel(Path(dirpath) / filename))
+            if len(items) >= MAX_LIST_ITEMS:
+                items.append("… список обрезан, показана вся просмотренная часть дерева")
+                return "\n".join(items)
     if not items:
         return "(пусто)"
     return "\n".join(items)
 
 
-def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
+def _resolve_file(path: str) -> Path:
     target = safe_path(path)
-    if not target.is_file():
-        raise WorkspaceError(f"Файл не найден: {path}")
+    if target.is_file():
+        return target
+    matches = _find_all_by_name(path)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        listed = "\n".join(f"- {_rel(item)}" for item in matches)
+        raise WorkspaceError(
+            f"Файл «{Path(path).name}» найден в нескольких местах. "
+            f"Укажите какой:\n{listed}"
+        )
+    raise WorkspaceError(f"Файл не найден: {path}")
+
+
+def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
+    target = _resolve_file(path)
     raw = target.read_bytes()
     if b"\x00" in raw[:4096]:
         raise WorkspaceError("Бинарный файл читать нельзя")
@@ -100,6 +176,43 @@ def write_file(path: str, content: str) -> str:
         raise WorkspaceError("Путь вне доверенных папок")
     target.write_text(content, encoding="utf-8")
     return f"Записано: {_rel(target)} ({len(content)} символов)"
+
+
+def edit_file(
+    path: str,
+    old_text: str,
+    new_text: str,
+    replace_all: bool = False,
+) -> str:
+    needle = old_text or ""
+    if not needle:
+        raise WorkspaceError("Пустой old_text — укажи точный фрагмент из файла")
+    if isinstance(replace_all, str):
+        replace_all = replace_all.strip().lower() in {"1", "true", "yes", "да"}
+    else:
+        replace_all = bool(replace_all)
+    target = _resolve_file(path)
+    if b"\x00" in target.read_bytes()[:4096]:
+        raise WorkspaceError("Бинарный файл менять нельзя")
+    current = target.read_text(encoding="utf-8")
+    count = current.count(needle)
+    if count == 0:
+        raise WorkspaceError(
+            "Фрагмент old_text в файле не найден. Сначала read_file и скопируй текст как есть."
+        )
+    if count > 1 and not replace_all:
+        raise WorkspaceError(
+            f"Фрагмент встречается {count} раз. Уточни old_text или поставь replace_all=true."
+        )
+    if replace_all:
+        updated = current.replace(needle, new_text or "")
+    else:
+        updated = current.replace(needle, new_text or "", 1)
+    if not trusted.is_inside_trusted(target):
+        raise WorkspaceError("Путь вне доверенных папок")
+    target.write_text(updated, encoding="utf-8")
+    changed = count if replace_all else 1
+    return f"Изменено: {_rel(target)} ({changed} фрагмент)"
 
 
 def search_files(query: str, path: str = ".") -> str:

@@ -66,9 +66,9 @@ def display_path(path: Path) -> str:
     workspace = _workspace()
     resolved = path.resolve()
     if resolved == workspace:
-        return "workspace/"
+        return "."
     try:
-        return "workspace/" + resolved.relative_to(workspace).as_posix()
+        return resolved.relative_to(workspace).as_posix()
     except ValueError:
         return str(resolved)
 
@@ -166,7 +166,7 @@ def remove_folder(raw: str) -> list[Path]:
 
 
 def format_list() -> str:
-    lines = [f"- {display_path(_workspace())} (всегда, нельзя исключить)"]
+    lines = ["- workspace/ (всегда, нельзя исключить)"]
     extras = extra_folders()
     if extras:
         for path in extras:

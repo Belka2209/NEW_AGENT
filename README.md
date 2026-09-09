@@ -11,6 +11,7 @@
 - Диалог в браузере и в терминале
 - История чатов (SQLite)
 - Файлы и команды в `workspace/` и в доверенных папках из `.env`
+- Ревью и правки кода (`edit_file`), на задачах про код — модель `OLLAMA_CODE_MODEL`
 - Поиск в интернете (DuckDuckGo)
 - Вакансии на hh.ru (официальный API, без Chrome)
 - Погода (Open-Meteo)
@@ -212,6 +213,7 @@ Get-Content D:\MY_AGENT\NEW_AGENT\data\agent.log -Tail 50
 ```
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen2.5-coder:14b
+OLLAMA_CODE_MODEL=qwen2.5-coder:14b
 MAX_AGENT_STEPS=12
 TERMINAL_TIMEOUT=45
 TELEGRAM_BOT_TOKEN=
@@ -230,6 +232,19 @@ TRUSTED_FOLDERS=D:/Docs;C:/Users/me/Work
 - «исключи D:\Docs» или «убери Docs из доверенных»
 
 Корень диска (`D:\`) добавить нельзя. `workspace/` исключить нельзя. После добавления из чата перезапуск не нужен.
+
+## Код: ревью и правки
+
+На фразы вроде «сделай ревью», «исправь баг», «внеси изменения» или имя файла `.py` / `.js` агент берёт модель `OLLAMA_CODE_MODEL` (по умолчанию `qwen2.5-coder:14b`) и правит через `edit_file`, не перезаписывая файл целиком.
+
+В `.env` на RDP:
+
+```
+OLLAMA_MODEL=qwen3.5:9b
+OLLAMA_CODE_MODEL=qwen2.5-coder:14b
+```
+
+Две модели сразу в VRAM держать не нужно: Ollama подгружает coder на ход с кодом. Если coder ещё не скачан: `ollama pull qwen2.5-coder:14b`.
 
 ## Telegram-бот (необязательно)
 

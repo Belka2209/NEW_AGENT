@@ -26,29 +26,90 @@ _BROWSER_TABS = re.compile(r"вкладк|что открыто", re.I)
 _USELESS_REPLY = re.compile(
     r"нет контекста|начало нашего общения|чем могу помочь|"
     r"что бы вы хотели|я готов помочь|напишите, что нужно|"
-    r"узнать погоду|найти вакансии|работать с файлами",
+    r"узнать погоду|найти вакансии|работать с файлами|"
+    r"нет доступа к истории|новый чат без контекста|"
+    r"прошлых запросов|уточните.{0,40}задач",
     re.I,
 )
 _PROMISE_ONLY = re.compile(
     r"сейчас прочитаю|сейчас посмотрю|открою вкладк|сейчас открою",
     re.I,
 )
+_FILE_HINT = re.compile(
+    r"файл|проверь|прочит|открой|покажи|что\s+там\s+за\s+код|путь|адрес",
+    re.I,
+)
+_WRITE_HINT = re.compile(r"создай|запиши|сохрани|перезапиши", re.I)
+_PATH_TOKEN = re.compile(
+    r'"([^"]+)"|'
+    r"'([^']+)'|"
+    r"([A-Za-z]:[\\/][^\s]+)|"
+    r"((?:[\w.\-]+[\\/])+[\w.\-]+)|"
+    r"([\w.\-]+\.[A-Za-z0-9]{1,12})"
+)
+_FILE_TOOLS = {"read_file", "list_files", "search_files", "write_file", "edit_file"}
+_CODE_ASK = re.compile(
+    r"\b(ревью|review|рефактор|refactor|линт|lint|баг|bug|pytest|unittest)\b|"
+    r"исправ(ь|ить)|поправ(ь|ить)|внеси\s+изменен|"
+    r"напиши\s+(код|функц|класс|скрипт)|"
+    r"что\s+(делает|за\s+код)|"
+    r"\.(py|js|ts|tsx|jsx|go|rs|java|kt|cs|php|rb|cpp|c|h|sql|ps1|sh|vue)\b",
+    re.I,
+)
+
+
+def _wants_code(text: str) -> bool:
+    return bool(_CODE_ASK.search(text or ""))
+
+
+def _turn_model(user_text: str) -> str:
+    if _wants_code(user_text) and (settings.ollama_code_model or "").strip():
+        return settings.ollama_code_model.strip()
+    return settings.ollama_model
 
 
 def _tool_name(call: dict[str, Any]) -> str:
     return (call.get("function") or {}).get("name") or ""
 
 
-def _fake_call(name: str) -> dict[str, Any]:
+def _fake_call(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "id": f"call_{name}_auto",
         "type": "function",
-        "function": {"name": name, "arguments": "{}"},
+        "function": {
+            "name": name,
+            "arguments": json.dumps(args or {}, ensure_ascii=False),
+        },
     }
 
 
 def _has_browser_tool(calls: list[dict[str, Any]]) -> bool:
     return any(_tool_name(call).startswith("browser_") for call in calls)
+
+
+def _has_file_tool(calls: list[dict[str, Any]]) -> bool:
+    return any(_tool_name(call) in _FILE_TOOLS for call in calls)
+
+
+def _extract_file_path(text: str) -> str | None:
+    found: list[str] = []
+    for match in _PATH_TOKEN.finditer(text or ""):
+        value = next((item for item in match.groups() if item), "")
+        value = value.strip().strip(".,;")
+        if value and value.lower() not in {"workspace", "chrome"}:
+            found.append(value)
+    return found[-1] if found else None
+
+
+def _force_file_call(user_text: str) -> dict[str, Any] | None:
+    if _WRITE_HINT.search(user_text or ""):
+        return None
+    if not _FILE_HINT.search(user_text or ""):
+        return None
+    path = _extract_file_path(user_text)
+    if not path:
+        return None
+    return _fake_call("read_file", {"path": path})
 
 
 def _force_browser_call(user_text: str, content: str) -> dict[str, Any] | None:
@@ -76,10 +137,11 @@ def _title_from(text: str) -> str:
 async def _complete(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    model: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     content = ""
     tool_calls: list[dict[str, Any]] = []
-    async for event in stream_chat(messages, tools):
+    async for event in stream_chat(messages, tools, model=model):
         if event["type"] == "token":
             content += event["text"]
         elif event["type"] == "complete":
@@ -107,20 +169,28 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
     user_message = {"role": "user", "content": user_text}
     store.add_message(session_id, user_message)
     log = get_logger()
-    log.info("turn session=%s user=%s", session_id, user_text[:300])
+    model = _turn_model(user_text)
+    code_task = _wants_code(user_text)
+    log.info("turn session=%s model=%s user=%s", session_id, model, user_text[:300])
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt()}]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": build_system_prompt(code_task=code_task)}
+    ]
     messages.extend(history)
     messages.append(user_message)
     collected: list[str] = []
 
     try:
         for _ in range(settings.max_agent_steps):
-            content, tool_calls = await _complete(messages, SCHEMAS)
+            content, tool_calls = await _complete(messages, SCHEMAS, model=model)
             if not content and not tool_calls:
-                content, tool_calls = await _complete(messages, [])
+                content, tool_calls = await _complete(messages, [], model=model)
 
-            if not _has_browser_tool(tool_calls):
+            if not _has_file_tool(tool_calls):
+                forced_file = _force_file_call(user_text)
+                if forced_file and not any(item.startswith("read_file:") for item in collected):
+                    tool_calls = [forced_file]
+            if not tool_calls and not _has_browser_tool(tool_calls):
                 forced = _force_browser_call(user_text, content)
                 if forced and not any(
                     item.startswith("browser_") for item in collected

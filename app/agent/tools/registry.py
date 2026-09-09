@@ -24,7 +24,7 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "Список файлов. path: относительный в workspace/ или полный путь внутри доверенной папки.",
+            "description": "Рекурсивный список всех файлов в папке (вся директория, не только корень).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -40,11 +40,14 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Прочитать текстовый файл из workspace/ или доверенной папки.",
+            "description": "Прочитать текстовый файл. path — любое имя или путь, который дал пользователь.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {
+                        "type": "string",
+                        "description": "Имя файла, относительный или полный путь",
+                    },
                     "offset": {"type": "integer", "description": "Первая строка, с 1"},
                     "limit": {"type": "integer", "description": "Сколько строк прочитать"},
                 },
@@ -64,6 +67,29 @@ SCHEMAS: list[dict[str, Any]] = [
                     "content": {"type": "string"},
                 },
                 "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": (
+                "Точечная правка файла: заменить old_text на new_text. "
+                "Для ревью-правок, не перезаписывай весь файл."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Имя или путь файла"},
+                    "old_text": {"type": "string", "description": "Точный фрагмент из файла"},
+                    "new_text": {"type": "string", "description": "На что заменить"},
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "Заменить все вхождения, по умолчанию только одно",
+                    },
+                },
+                "required": ["path", "old_text", "new_text"],
             },
         },
     },
@@ -402,6 +428,7 @@ _HANDLERS: dict[str, ToolFn] = {
     "list_files": files.list_files,
     "read_file": files.read_file,
     "write_file": files.write_file,
+    "edit_file": files.edit_file,
     "search_files": files.search_files,
     "run_command": terminal.run_command,
     "trust_folder": trusted.trust_folder,

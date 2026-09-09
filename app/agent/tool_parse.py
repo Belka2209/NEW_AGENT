@@ -11,6 +11,7 @@ KNOWN_TOOLS = {
     "list_files",
     "read_file",
     "write_file",
+    "edit_file",
     "search_files",
     "run_command",
     "trust_folder",

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import threading
-from urllib.parse import quote_plus
+import time
+from pathlib import Path
+from urllib.parse import quote_plus, urlparse
+
+import httpx
 
 from app.config import settings
 
@@ -10,39 +16,91 @@ _playwright = None
 _browser = None
 
 
-def _connect():
+def _chrome_exe() -> Path:
+    roots = [
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        os.environ.get("LocalAppData", ""),
+    ]
+    for root in roots:
+        if not root:
+            continue
+        candidate = Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe"
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError("Google Chrome не найден. Установите его на RDP.")
+
+
+def _cdp_ready() -> bool:
+    url = settings.browser_cdp_url.rstrip("/") + "/json/version"
+    try:
+        response = httpx.get(url, timeout=1.5)
+        return response.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _launch_chrome() -> None:
+    if _cdp_ready():
+        return
+    exe = _chrome_exe()
+    port = urlparse(settings.browser_cdp_url).port or 9222
+    profile = settings.chrome_profile_dir
+    subprocess.Popen(
+        [
+            str(exe),
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={profile}",
+            "--remote-allow-origins=*",
+            "about:blank",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(25):
+        time.sleep(0.4)
+        if _cdp_ready():
+            return
+    raise RuntimeError(
+        "Не удалось открыть Chrome с отладкой. "
+        "Проверьте, что порт 9222 свободен."
+    )
+
+
+def _playwright_connect():
     global _playwright, _browser
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError("Нет пакета playwright. На RDP: pip install playwright") from exc
+    if _playwright is None:
+        _playwright = sync_playwright().start()
+    _browser = _playwright.chromium.connect_over_cdp(settings.browser_cdp_url)
+    return _browser
+
+
+def _connect():
+    global _browser
     if _browser is not None:
         try:
             _ = _browser.contexts
             return _browser
         except Exception:
             _browser = None
+    if not _cdp_ready():
+        _launch_chrome()
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise RuntimeError(
-            "Нет пакета playwright. На RDP: pip install playwright"
-        ) from exc
-
-    if _playwright is None:
-        _playwright = sync_playwright().start()
-    try:
-        _browser = _playwright.chromium.connect_over_cdp(settings.browser_cdp_url)
-    except Exception as exc:
-        raise RuntimeError(
-            "Chrome не доступен на "
-            f"{settings.browser_cdp_url}. Закройте все окна Chrome и запустите "
-            r".\chrome-debug.ps1 — затем откройте нужные сайты и войдите."
-        ) from exc
-    return _browser
+        return _playwright_connect()
+    except Exception:
+        _launch_chrome()
+        return _playwright_connect()
 
 
 def _page():
     browser = _connect()
     contexts = browser.contexts
     if not contexts:
-        raise RuntimeError("В Chrome нет окон. Откройте вкладку.")
+        raise RuntimeError("В Chrome нет окон.")
     pages = contexts[0].pages
     if not pages:
         raise RuntimeError("В Chrome нет вкладок.")
@@ -56,17 +114,30 @@ def _clip(text: str, limit: int = 10_000) -> str:
     return text or "(пусто)"
 
 
+def _status_text() -> str:
+    browser = _connect()
+    pages = []
+    for ctx in browser.contexts:
+        pages.extend(ctx.pages)
+    lines = [
+        "Chrome подключён "
+        f"(профиль агента: {settings.chrome_profile_dir}). "
+        f"Вкладок: {len(pages)}"
+    ]
+    for index, page in enumerate(pages, start=1):
+        title = page.title() or "без названия"
+        lines.append(f"{index}. {title} — {page.url}")
+    return "\n".join(lines)
+
+
+def browser_start() -> str:
+    with _lock:
+        return _status_text()
+
+
 def browser_status() -> str:
     with _lock:
-        browser = _connect()
-        pages = []
-        for ctx in browser.contexts:
-            pages.extend(ctx.pages)
-        lines = [f"Chrome подключён. Вкладок: {len(pages)}"]
-        for index, page in enumerate(pages, start=1):
-            title = page.title() or "без названия"
-            lines.append(f"{index}. {title} — {page.url}")
-        return "\n".join(lines)
+        return _status_text()
 
 
 def browser_tabs() -> str:

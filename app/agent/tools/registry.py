@@ -236,8 +236,16 @@ SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "browser_start",
+            "description": "Запустить Chrome агента, если он ещё не открыт, и показать вкладки.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "browser_status",
-            "description": "Подключиться к вашему Chrome и показать открытые вкладки.",
+            "description": "Подключиться к Chrome агента и показать вкладки. Если Chrome нет — запустит сам.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -355,6 +363,7 @@ _HANDLERS: dict[str, ToolFn] = {
     "browser_type": browser.browser_type,
     "browser_press": browser.browser_press,
     "browser_search": browser.browser_search,
+    "browser_start": browser.browser_start,
 }
 
 

@@ -39,7 +39,7 @@ def web_search(query: str, max_results: int = 5) -> str:
         except Exception as exc:
             return (
                 "Веб-поиск ничего не нашёл. В Chrome тоже не вышло: "
-                f"{exc}. Запустите chrome-debug.ps1 и повторите."
+                f"{exc}. Скажите агенту «открой браузер» или проверьте, что установлен Google Chrome."
             )
 
     lines = [

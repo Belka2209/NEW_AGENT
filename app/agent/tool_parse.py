@@ -35,6 +35,7 @@ KNOWN_TOOLS = {
     "browser_type",
     "browser_press",
     "browser_search",
+    "browser_start",
 }
 
 

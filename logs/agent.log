@@ -1,0 +1,1 @@
+# Лог агента. На RDP после проверки: git add logs/agent.log && git commit -m "dev log" && git push

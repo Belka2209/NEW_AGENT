@@ -41,7 +41,9 @@ class Settings(BaseSettings):
 
     @property
     def log_path(self) -> Path:
-        return self.data_dir / "agent.log"
+        path = ROOT / "logs"
+        path.mkdir(parents=True, exist_ok=True)
+        return path / "agent.log"
 
     @property
     def chrome_profile_dir(self) -> Path:

@@ -10,3 +10,4 @@ __pycache__/
 *.egg-info/
 workspace/*
 !workspace/.gitkeep
+logs/*.log.*

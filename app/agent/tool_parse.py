@@ -26,6 +26,14 @@ KNOWN_TOOLS = {
     "reminder_add",
     "reminder_list",
     "reminder_done",
+    "hh_search",
+    "browser_status",
+    "browser_tabs",
+    "browser_goto",
+    "browser_content",
+    "browser_click",
+    "browser_type",
+    "browser_press",
 }
 
 

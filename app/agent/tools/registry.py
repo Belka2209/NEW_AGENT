@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any, Callable
 
-from app.agent.tools import clock, files, memory, reminders, telegram, terminal, web
+from app.agent.tools import browser, clock, files, hh, memory, reminders, telegram, terminal, web
 
 ToolFn = Callable[..., str]
 
@@ -100,6 +100,22 @@ SCHEMAS: list[dict[str, Any]] = [
                 "properties": {
                     "query": {"type": "string"},
                     "max_results": {"type": "integer"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hh_search",
+            "description": "Поиск вакансий на hh.ru. city: Санкт-Петербург или Москва.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "city": {"type": "string"},
+                    "per_page": {"type": "integer"},
                 },
                 "required": ["query"],
             },
@@ -220,6 +236,72 @@ SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "browser_status",
+            "description": "Подключиться к вашему Chrome и показать открытые вкладки.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_goto",
+            "description": "Открыть URL в текущей вкладке Chrome (Bitrix, hh.ru и т.д.).",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_content",
+            "description": "Прочитать видимый текст текущей вкладки Chrome.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Клик по тексту на странице (кнопка, ссылка, пункт меню).",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": "Ввести текст. field — подпись поля, если нужно сначала кликнуть по нему.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "field": {"type": "string"},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_press",
+            "description": "Нажать клавишу, по умолчанию Enter.",
+            "parameters": {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fetch_url",
             "description": "Скачать текст страницы по http/https ссылке.",
             "parameters": {
@@ -252,6 +334,14 @@ _HANDLERS: dict[str, ToolFn] = {
     "reminder_add": reminders.reminder_add,
     "reminder_list": reminders.reminder_list,
     "reminder_done": reminders.reminder_done,
+    "hh_search": hh.hh_search,
+    "browser_status": browser.browser_status,
+    "browser_tabs": browser.browser_tabs,
+    "browser_goto": browser.browser_goto,
+    "browser_content": browser.browser_content,
+    "browser_click": browser.browser_click,
+    "browser_type": browser.browser_type,
+    "browser_press": browser.browser_press,
 }
 
 

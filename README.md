@@ -13,6 +13,7 @@
 - Файлы только внутри `workspace/`
 - Команды из `workspace/`
 - Поиск в интернете (DuckDuckGo)
+- Вакансии на hh.ru (официальный API, без Chrome)
 - Погода (Open-Meteo)
 - Долгая память между чатами и между браузером/терминалом
 - Локальные напоминания (без Telegram)
@@ -138,6 +139,7 @@ cd NEW_AGENT
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+# playwright нужен для управления Chrome (Bitrix, hh.ru)
 copy .env.example .env
 ollama pull qwen2.5-coder:14b
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
@@ -159,6 +161,31 @@ git pull
 ```
 
 Модели Ollama и файл `.env` в git не входят.
+
+## Chrome: Bitrix и hh.ru
+
+Агент может смотреть **ваш уже открытый Chrome** (учётка Bitrix, hh.ru). Это не страница чата http://127.0.0.1:8000.
+
+Chrome нужно один раз запустить с отладкой. Обычный уже открытый Chrome агент не увидит.
+
+1. Закройте все окна Chrome.
+2. На RDP:
+
+```powershell
+cd D:\MY_AGENT\NEW_AGENT
+.\chrome-debug.ps1
+```
+
+3. В этом Chrome откройте портал Bitrix и/или hh.ru и войдите.
+4. `pip install playwright` в `.venv` агента (один раз).
+5. В чате агента: «посмотри вкладки браузера», «какие у меня задачи в Bitrix», «найди на hh python в Питере».
+
+Не закрывайте этот Chrome, пока агент с ним работает. Если открыть Chrome обычным ярлыком — порт 9222 пропадёт, снова `chrome-debug.ps1`.
+
+Примеры фраз:
+
+- «открой мои задачи в Bitrix и кратко перескажи»
+- «на hh найди вакансии аналитика в Санкт-Петербурге»
 
 ## Память, напоминания, логи
 

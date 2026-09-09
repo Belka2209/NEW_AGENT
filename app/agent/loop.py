@@ -94,12 +94,43 @@ _CODE_ASK = re.compile(
 )
 
 
+_CODE_CONTINUE = re.compile(
+    r"улучш|исправ|поправ|на основании|ревью|ещё|еще|ну и|"
+    r"а что|почему|как лучше|можно ли|дальше|продолж",
+    re.I,
+)
+_CLARIFY_REPLY = re.compile(
+    r"какой файл|уточни|что именно|не указали имя|укажите.*имя файла|общий вопрос",
+    re.I,
+)
+
+
 def _wants_code(text: str) -> bool:
     return bool(_CODE_ASK.search(text or ""))
 
 
-def _turn_model(user_text: str) -> str:
-    if _wants_code(user_text) and (settings.ollama_code_model or "").strip():
+def _file_chunks_from_history(history: list[dict[str, Any]]) -> list[str]:
+    chunks: list[str] = []
+    for msg in history:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content") or ""
+        name = msg.get("name") or ""
+        if name == "read_file" or (
+            " строки " in content[:120] and " из " in content[:120]
+        ):
+            chunks.append(content)
+    return chunks
+
+
+def _is_code_turn(user_text: str, history: list[dict[str, Any]]) -> bool:
+    if _wants_code(user_text):
+        return True
+    return bool(_file_chunks_from_history(history) and _CODE_CONTINUE.search(user_text or ""))
+
+
+def _turn_model(code_task: bool) -> str:
+    if code_task and (settings.ollama_code_model or "").strip():
         return settings.ollama_code_model.strip()
     return settings.ollama_model
 
@@ -311,7 +342,11 @@ def _thin_code_answer(text: str, code_task: bool) -> bool:
     if not code_task:
         return False
     clean = (text or "").strip()
-    return len(clean) < 200 or bool(_STALL_REPLY.search(clean))
+    return (
+        len(clean) < 200
+        or bool(_STALL_REPLY.search(clean))
+        or bool(_CLARIFY_REPLY.search(clean))
+    )
 
 
 async def _force_review(user_text: str, collected: list[str], model: str) -> str:
@@ -383,8 +418,8 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
     user_message = {"role": "user", "content": user_text}
     store.add_message(session_id, user_message)
     log = get_logger()
-    model = _turn_model(user_text)
-    code_task = _wants_code(user_text)
+    code_task = _is_code_turn(user_text, history)
+    model = _turn_model(code_task)
     log.info("turn session=%s model=%s user=%s", session_id, model, user_text[:300])
     _dbg(
         "B",
@@ -395,6 +430,7 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             "code_task": code_task,
             "extracted": _extract_file_path(user_text),
             "file_hint": bool(_FILE_HINT.search(user_text or "")),
+            "history_files": len(_file_chunks_from_history(history)),
             "user": user_text[:120],
         },
     )
@@ -419,6 +455,13 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                 tool_calls = [continued]
                 after_complete = ["read_file"]
                 after_filter = ["read_file"]
+            elif answer_now and code_task and _file_fully_read(collected):
+                _dbg(
+                    "I",
+                    "loop.py:direct_review",
+                    "skip first complete after full read",
+                    {"chunks": len(collected)},
+                )
             else:
                 toolset = [] if answer_now else SCHEMAS
                 content, tool_calls = await _complete(messages, toolset, model=model)
@@ -458,14 +501,21 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             )
 
             if not tool_calls:
-                if _thin_code_answer(content, code_task) and _has_file_payload(collected):
+                source = collected if _has_file_payload(collected) else [
+                    f"read_file: {chunk}" for chunk in _file_chunks_from_history(history)
+                ]
+                if _thin_code_answer(content, code_task) and source:
                     _dbg(
                         "H",
                         "loop.py:short_retry",
                         "clean-slate review",
-                        {"content_head": (content or "")[:160], "content_len": len(content or "")},
+                        {
+                            "content_head": (content or "")[:160],
+                            "content_len": len(content or ""),
+                            "source_chunks": len(source),
+                        },
                     )
-                    content = await _force_review(user_text, collected, model)
+                    content = await _force_review(user_text, source, model)
                 before = content or ""
                 content = _final_text(content, collected)
                 if not content:

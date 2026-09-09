@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -11,6 +12,58 @@ from app.config import settings
 from app.db import store
 from app.llm.client import OllamaError, stream_chat
 from app.logutil import get_logger
+
+
+_BROWSER_ASK = re.compile(
+    r"браузер|вкладк|chrome|"
+    r"прочит\w*\s+(страниц|вкладк)|"
+    r"что\s+на\s+страниц|"
+    r"что\s+там\s+в\s+браузер|"
+    r"что\s+открыто",
+    re.I,
+)
+_BROWSER_TABS = re.compile(r"вкладк|что открыто", re.I)
+_USELESS_REPLY = re.compile(
+    r"нет контекста|начало нашего общения|чем могу помочь|"
+    r"что бы вы хотели|я готов помочь|напишите, что нужно|"
+    r"узнать погоду|найти вакансии|работать с файлами",
+    re.I,
+)
+_PROMISE_ONLY = re.compile(
+    r"сейчас прочитаю|сейчас посмотрю|открою вкладк|сейчас открою",
+    re.I,
+)
+
+
+def _tool_name(call: dict[str, Any]) -> str:
+    return (call.get("function") or {}).get("name") or ""
+
+
+def _fake_call(name: str) -> dict[str, Any]:
+    return {
+        "id": f"call_{name}_auto",
+        "type": "function",
+        "function": {"name": name, "arguments": "{}"},
+    }
+
+
+def _has_browser_tool(calls: list[dict[str, Any]]) -> bool:
+    return any(_tool_name(call).startswith("browser_") for call in calls)
+
+
+def _force_browser_call(user_text: str, content: str) -> dict[str, Any] | None:
+    text = f"{user_text}\n{content}"
+    if not _BROWSER_ASK.search(text) and not _PROMISE_ONLY.search(content or ""):
+        return None
+    name = "browser_status" if _BROWSER_TABS.search(user_text) else "browser_content"
+    return _fake_call(name)
+
+
+def _final_text(content: str, collected: list[str]) -> str:
+    text = (content or "").strip()
+    if collected and (not text or _USELESS_REPLY.search(text) or _PROMISE_ONLY.search(text)):
+        return "Вот что получилось:\n\n" + "\n\n".join(collected)
+    return text
 
 
 def _title_from(text: str) -> str:
@@ -67,23 +120,26 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             if not content and not tool_calls:
                 content, tool_calls = await _complete(messages, [])
 
-            assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
-            if tool_calls:
-                assistant["tool_calls"] = tool_calls
-            store.add_message(session_id, assistant)
-            messages.append(assistant)
+            if not _has_browser_tool(tool_calls):
+                forced = _force_browser_call(user_text, content)
+                if forced and not any(
+                    item.startswith("browser_") for item in collected
+                ):
+                    tool_calls = [forced]
 
             if not tool_calls:
+                content = _final_text(content, collected)
                 if not content:
-                    content = (
-                        "Вот что получилось:\n\n" + "\n\n".join(collected)
-                        if collected
-                        else "Модель вернула пустой ответ. Напишите /new и спросите ещё раз."
-                    )
-                    store.add_message(session_id, {"role": "assistant", "content": content})
+                    content = "Модель вернула пустой ответ. Напишите /new и спросите ещё раз."
+                store.add_message(session_id, {"role": "assistant", "content": content})
                 yield {"type": "token", "text": content}
                 yield {"type": "done"}
                 return
+
+            assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
+            assistant["tool_calls"] = tool_calls
+            store.add_message(session_id, assistant)
+            messages.append(assistant)
 
             for call in tool_calls:
                 name = call.get("function", {}).get("name") or "unknown"
@@ -112,7 +168,11 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             messages.append(
                 {
                     "role": "user",
-                    "content": "Ответь обычным текстом по результату инструментов. Не вызывай инструменты снова, если данных уже хватает.",
+                    "content": (
+                        "Это продолжение того же запроса. Перескажи результат инструментов "
+                        "пользователю по делу. Не здоровайся, не пиши что нет контекста "
+                        "и не предлагай меню. Не вызывай инструменты снова, если данных хватает."
+                    ),
                 }
             )
 

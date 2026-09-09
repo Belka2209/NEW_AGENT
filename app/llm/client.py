@@ -84,6 +84,7 @@ async def stream_chat(
         "tools": tools,
         "tool_choice": "auto",
         "temperature": 0.3,
+        "max_tokens": 4096,
     }
 
     content = ""

@@ -15,7 +15,7 @@ from app.llm.client import OllamaError, stream_chat
 from app.logutil import get_logger
 
 
-def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any], run_id: str = "post-fix") -> None:
     # #region agent log
     try:
         import time
@@ -23,7 +23,7 @@ def _dbg(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) 
 
         payload = {
             "sessionId": "378790",
-            "runId": "pre-fix",
+            "runId": run_id,
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -130,6 +130,12 @@ def _extract_file_path(text: str) -> str | None:
     return found[-1] if found else None
 
 
+_READ_RANGE = re.compile(
+    r"^read_file:\s*(.+?)\s+строки\s+(\d+)-(\d+)\s+из\s+(\d+)",
+    re.M,
+)
+
+
 def _read_ok(item: str) -> bool:
     return item.startswith("read_file:") and "строки" in item
 
@@ -146,8 +152,60 @@ def _has_page_payload(collected: list[str]) -> bool:
     return any(_page_ok(item) for item in collected)
 
 
+def _last_read_meta(collected: list[str]) -> dict[str, Any] | None:
+    for item in reversed(collected):
+        match = _READ_RANGE.search(item)
+        if match:
+            return {
+                "display": match.group(1).strip(),
+                "start": int(match.group(2)),
+                "end": int(match.group(3)),
+                "total": int(match.group(4)),
+            }
+    return None
+
+
+def _covered_end(collected: list[str], display: str) -> int:
+    covered = 0
+    for item in collected:
+        match = _READ_RANGE.search(item)
+        if match and match.group(1).strip() == display:
+            covered = max(covered, int(match.group(3)))
+    return covered
+
+
+def _file_fully_read(collected: list[str]) -> bool:
+    meta = _last_read_meta(collected)
+    if meta is None:
+        return False
+    return _covered_end(collected, meta["display"]) >= meta["total"]
+
+
+def _needs_full_file(user_text: str) -> bool:
+    if _EDIT_HINT.search(user_text or "") or _WRITE_HINT.search(user_text or ""):
+        return False
+    return _wants_code(user_text)
+
+
+def _continue_read(user_text: str, collected: list[str]) -> dict[str, Any] | None:
+    if not _needs_full_file(user_text) or _file_fully_read(collected):
+        return None
+    meta = _last_read_meta(collected)
+    if meta is None:
+        return None
+    covered = _covered_end(collected, meta["display"])
+    if covered >= meta["total"]:
+        return None
+    path = _extract_file_path(user_text) or meta["display"]
+    if path.replace("\\", "/").startswith("workspace/"):
+        path = path.replace("\\", "/")[len("workspace/") :]
+    return _fake_call("read_file", {"path": path, "offset": covered + 1, "limit": 500})
+
+
 def _should_answer_now(user_text: str, collected: list[str]) -> bool:
     if _has_file_payload(collected) and not _EDIT_HINT.search(user_text or ""):
+        if _needs_full_file(user_text) and not _file_fully_read(collected):
+            return False
         return True
     if _has_page_payload(collected) and (
         _BROWSER_ASK.search(user_text or "") or _PROMISE_ONLY.search(user_text or "")
@@ -211,10 +269,14 @@ def _followup_after_tools(code_task: bool, collected: list[str]) -> str:
             "Снова вызови read_file и edit_file с точным текстом. Не здоровайся."
         )
     if code_task:
+        if not _file_fully_read(collected):
+            return (
+                "Файл ещё не дочитан. Не отвечай пользователю и не спрашивай имя файла. "
+                "Дочитай оставшиеся строки через read_file с offset."
+            )
         return (
-            "Тот же запрос про код. Ответь по результату инструментов: "
-            "ревью по строкам или что изменено. Не здоровайся и не пиши, что нет контекста. "
-            "Не вызывай инструменты снова, если данных хватает."
+            "Файл уже прочитан. Сразу напиши ревью по номерам строк: классы, риски, баги. "
+            "Не здоровайся, не спрашивай имя файла и не спрашивай, что делать."
         )
     return (
         "Тот же запрос. Перескажи результат инструментов по делу. "
@@ -317,26 +379,35 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
     try:
         for _ in range(settings.max_agent_steps):
             answer_now = _should_answer_now(user_text, collected)
-            toolset = [] if answer_now else SCHEMAS
-            content, tool_calls = await _complete(messages, toolset, model=model)
-            if not content and not tool_calls:
-                content, tool_calls = await _complete(messages, [], model=model)
-            after_complete = [_tool_name(call) for call in tool_calls]
-
-            if answer_now:
-                tool_calls = []
+            continued = None if answer_now else _continue_read(user_text, collected)
+            content = ""
+            tool_calls: list[dict[str, Any]] = []
+            after_complete: list[str] = []
+            after_filter: list[str] = []
+            toolset: list[dict[str, Any]] = []
+            if continued:
+                tool_calls = [continued]
+                after_complete = ["read_file"]
+                after_filter = ["read_file"]
             else:
-                tool_calls = _filter_tool_calls(user_text, tool_calls, collected)
-            after_filter = [_tool_name(call) for call in tool_calls]
-
-            if not _has_file_tool(tool_calls):
-                forced_file = _force_file_call(user_text, collected)
-                if forced_file:
-                    tool_calls = [forced_file]
-            if not tool_calls and not _has_browser_tool(tool_calls) and not _has_page_payload(collected):
-                forced = _force_browser_call(user_text, content)
-                if forced and not any(item.startswith("browser_content:") for item in collected):
-                    tool_calls = [forced]
+                toolset = [] if answer_now else SCHEMAS
+                content, tool_calls = await _complete(messages, toolset, model=model)
+                if not content and not tool_calls:
+                    content, tool_calls = await _complete(messages, [], model=model)
+                after_complete = [_tool_name(call) for call in tool_calls]
+                if answer_now:
+                    tool_calls = []
+                else:
+                    tool_calls = _filter_tool_calls(user_text, tool_calls, collected)
+                after_filter = [_tool_name(call) for call in tool_calls]
+                if not _has_file_tool(tool_calls):
+                    forced_file = _force_file_call(user_text, collected)
+                    if forced_file:
+                        tool_calls = [forced_file]
+                if not tool_calls and not _has_browser_tool(tool_calls) and not _has_page_payload(collected):
+                    forced = _force_browser_call(user_text, content)
+                    if forced and not any(item.startswith("browser_content:") for item in collected):
+                        tool_calls = [forced]
             after_force = [_tool_name(call) for call in tool_calls]
             _dbg(
                 "A",
@@ -350,11 +421,35 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                     "after_filter": after_filter,
                     "after_force": after_force,
                     "has_file_payload": _has_file_payload(collected),
+                    "file_full": _file_fully_read(collected),
+                    "continued": bool(continued),
                     "hypothesisD_parsed_tools": bool(after_complete) and not toolset,
                 },
             )
 
             if not tool_calls:
+                if (
+                    code_task
+                    and _has_file_payload(collected)
+                    and len((content or "").strip()) < 200
+                ):
+                    _dbg(
+                        "E",
+                        "loop.py:short_retry",
+                        "retry short answer",
+                        {"content_head": (content or "")[:160], "content_len": len(content or "")},
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Это не ревью. Напиши ревью по уже прочитанному коду: "
+                                "классы, риски, баги с номерами строк. "
+                                "Не спрашивай что делать и не проси имя файла."
+                            ),
+                        }
+                    )
+                    content, _ignored = await _complete(messages, [], model=model)
                 before = content or ""
                 content = _final_text(content, collected)
                 if not content:
@@ -367,7 +462,9 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                         "before_len": len(before),
                         "after_len": len(content or ""),
                         "replaced": before != content,
+                        "content_head": (content or "")[:160],
                         "collected": [item.split(":", 1)[0] for item in collected],
+                        "file_full": _file_fully_read(collected),
                     },
                 )
                 store.add_message(session_id, {"role": "assistant", "content": content})
@@ -402,6 +499,7 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                         "name": name,
                         "ok_read": _read_ok(f"{name}: {result}"),
                         "answer_now": _should_answer_now(user_text, collected),
+                        "file_full": _file_fully_read(collected),
                         "result_head": result[:80],
                     },
                 )

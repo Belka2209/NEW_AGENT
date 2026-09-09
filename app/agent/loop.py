@@ -4,12 +4,13 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from app.agent.prompts import SYSTEM_PROMPT
+from app.agent.prompts import build_system_prompt
 from app.agent.tool_parse import parse_text_tool_calls, strip_thinking
 from app.agent.tools.registry import SCHEMAS, execute_tool
 from app.config import settings
 from app.db import store
 from app.llm.client import OllamaError, stream_chat
+from app.logutil import get_logger
 
 
 def _title_from(text: str) -> str:
@@ -52,8 +53,10 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
 
     user_message = {"role": "user", "content": user_text}
     store.add_message(session_id, user_message)
+    log = get_logger()
+    log.info("turn session=%s user=%s", session_id, user_text[:300])
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt()}]
     messages.extend(history)
     messages.append(user_message)
     collected: list[str] = []
@@ -91,7 +94,9 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
                     parsed_args = {"_raw": raw_args}
 
                 yield {"type": "tool_start", "name": name, "args": parsed_args}
+                log.info("tool %s args=%s", name, str(parsed_args)[:400])
                 result = await execute_tool(name, raw_args)
+                log.info("tool_result %s %s", name, result[:400])
                 yield {"type": "tool_result", "name": name, "result": result}
                 collected.append(f"{name}: {result}")
 
@@ -121,4 +126,5 @@ async def run_turn(session_id: str, user_text: str) -> AsyncIterator[dict[str, A
             "message": f"Достигнут лимит шагов агента ({settings.max_agent_steps})",
         }
     except OllamaError as exc:
+        get_logger().error("llm %s", exc)
         yield {"type": "error", "message": str(exc)}

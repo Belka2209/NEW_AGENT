@@ -37,6 +37,18 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                due_at TEXT NOT NULL,
+                done INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
             """
         )
 
@@ -149,3 +161,56 @@ def list_messages(session_id: str) -> list[dict[str, Any]]:
 
 def llm_history(session_id: str) -> list[dict[str, Any]]:
     return [item["raw"] for item in list_messages(session_id)]
+
+
+def add_memory(text: str) -> dict[str, Any]:
+    stamp = _now()
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO memories (text, created_at) VALUES (?, ?)",
+            (text.strip(), stamp),
+        )
+        return {"id": cur.lastrowid, "text": text.strip(), "created_at": stamp}
+
+
+def list_memories() -> list[dict[str, Any]]:
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, text, created_at FROM memories ORDER BY id ASC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_memory(memory_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        return cur.rowcount > 0
+
+
+def add_reminder(text: str, due_at: str) -> dict[str, Any]:
+    stamp = _now()
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO reminders (text, due_at, done, created_at) VALUES (?, ?, 0, ?)",
+            (text.strip(), due_at, stamp),
+        )
+        return {"id": cur.lastrowid, "text": text.strip(), "due_at": due_at}
+
+
+def list_reminders(include_done: bool = False) -> list[dict[str, Any]]:
+    sql = "SELECT id, text, due_at, done, created_at FROM reminders"
+    if not include_done:
+        sql += " WHERE done = 0"
+    sql += " ORDER BY due_at ASC"
+    with _lock, _connect() as conn:
+        rows = conn.execute(sql).fetchall()
+    return [dict(row) for row in rows]
+
+
+def complete_reminder(reminder_id: int) -> bool:
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE reminders SET done = 1 WHERE id = ?",
+            (reminder_id,),
+        )
+        return cur.rowcount > 0

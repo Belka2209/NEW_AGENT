@@ -26,10 +26,18 @@ class Settings(BaseSettings):
         return path
 
     @property
+    def data_dir(self) -> Path:
+        path = ROOT / "data"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
     def db_path(self) -> Path:
-        data = ROOT / "data"
-        data.mkdir(parents=True, exist_ok=True)
-        return data / "agent.db"
+        return self.data_dir / "agent.db"
+
+    @property
+    def log_path(self) -> Path:
+        return self.data_dir / "agent.log"
 
     @property
     def web_dir(self) -> Path:

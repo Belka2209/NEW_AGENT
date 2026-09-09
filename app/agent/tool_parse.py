@@ -20,6 +20,12 @@ KNOWN_TOOLS = {
     "telegram_status",
     "telegram_chats",
     "telegram_send",
+    "memory_add",
+    "memory_list",
+    "memory_delete",
+    "reminder_add",
+    "reminder_list",
+    "reminder_done",
 }
 
 

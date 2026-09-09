@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any, Callable
 
-from app.agent.tools import clock, files, telegram, terminal, web
+from app.agent.tools import clock, files, memory, reminders, telegram, terminal, web
 
 ToolFn = Callable[..., str]
 
@@ -122,6 +122,73 @@ SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "memory_add",
+            "description": "Сохранить факт в долгую память (между чатами).",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_list",
+            "description": "Показать долгую память.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "memory_delete",
+            "description": "Удалить запись памяти по id.",
+            "parameters": {
+                "type": "object",
+                "properties": {"memory_id": {"type": "integer"}},
+                "required": ["memory_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reminder_add",
+            "description": "Локальное напоминание. when: 2026-09-09 18:00, сегодня 18:00, завтра 09:30.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "when": {"type": "string"},
+                },
+                "required": ["text", "when"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reminder_list",
+            "description": "Список активных локальных напоминаний.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reminder_done",
+            "description": "Отметить напоминание выполненным.",
+            "parameters": {
+                "type": "object",
+                "properties": {"reminder_id": {"type": "integer"}},
+                "required": ["reminder_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "telegram_status",
             "description": "Проверить, подключён ли Telegram-бот.",
             "parameters": {"type": "object", "properties": {}},
@@ -179,6 +246,12 @@ _HANDLERS: dict[str, ToolFn] = {
     "telegram_status": telegram.telegram_status,
     "telegram_chats": telegram.telegram_chats,
     "telegram_send": telegram.telegram_send,
+    "memory_add": memory.memory_add,
+    "memory_list": memory.memory_list,
+    "memory_delete": memory.memory_delete,
+    "reminder_add": reminders.reminder_add,
+    "reminder_list": reminders.reminder_list,
+    "reminder_done": reminders.reminder_done,
 }
 
 

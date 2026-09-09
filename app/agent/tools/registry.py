@@ -297,7 +297,10 @@ SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "browser_start",
-            "description": "Запустить Chrome агента, если он ещё не открыт, и показать вкладки.",
+            "description": (
+                "Сам открыть Chrome агента и показать вкладки. "
+                "Всегда используй это вместо скриптов и run_command."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     },

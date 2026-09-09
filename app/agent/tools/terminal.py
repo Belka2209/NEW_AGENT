@@ -28,6 +28,12 @@ def run_command(command: str, cwd: str = "") -> str:
     if not text:
         raise ValueError("Пустая команда")
     lowered = text.lower()
+    if "chrome-debug" in lowered or (
+        "remote-debugging-port" in lowered and "chrome" in lowered
+    ):
+        from app.agent.tools.browser import browser_start
+
+        return browser_start()
     for pattern in BLOCKED:
         if re.search(pattern, lowered):
             raise ValueError("Команда заблокирована как опасная")

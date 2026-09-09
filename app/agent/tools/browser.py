@@ -46,24 +46,30 @@ def _launch_chrome() -> None:
     exe = _chrome_exe()
     port = urlparse(settings.browser_cdp_url).port or 9222
     profile = settings.chrome_profile_dir
+    flags = 0
+    if os.name == "nt":
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(
         [
             str(exe),
             f"--remote-debugging-port={port}",
             f"--user-data-dir={profile}",
             "--remote-allow-origins=*",
+            "--no-first-run",
+            "--no-default-browser-check",
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        creationflags=flags,
     )
-    for _ in range(25):
-        time.sleep(0.4)
+    for _ in range(40):
+        time.sleep(0.5)
         if _cdp_ready():
             return
     raise RuntimeError(
-        "Не удалось открыть Chrome с отладкой. "
-        "Проверьте, что порт 9222 свободен."
+        f"Chrome не открыл отладку на {settings.browser_cdp_url}. "
+        f"Запускал {exe} с профилем {profile}."
     )
 
 
@@ -87,13 +93,20 @@ def _connect():
             return _browser
         except Exception:
             _browser = None
-    if not _cdp_ready():
-        _launch_chrome()
-    try:
-        return _playwright_connect()
-    except Exception:
-        _launch_chrome()
-        return _playwright_connect()
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            if not _cdp_ready():
+                _launch_chrome()
+            return _playwright_connect()
+        except Exception as exc:
+            last = exc
+            _browser = None
+    raise RuntimeError(
+        "Не удалось подключить Chrome агента. "
+        f"{last}. Нужны Google Chrome и pip install playwright. "
+        "Не запускайте chrome-debug.ps1 через Блокнот — вызовите browser_start."
+    ) from last
 
 
 def _page():
